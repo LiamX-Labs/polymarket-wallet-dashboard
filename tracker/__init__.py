@@ -1,0 +1,2 @@
+"""Polymarket BTC tracker package."""
+
