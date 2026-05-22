@@ -1,8 +1,9 @@
-# Databases
+# Databases and data files
 data/
 *.db
 *.sqlite
 *.sqlite3
+*.csv
 
 # Python
 __pycache__/
@@ -36,11 +37,13 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# Environment
+# Environment variables (NEVER commit actual .env files)
 .env
 .env.local
 .env.*.local
+.env.tracker
 .env.tracker.local
+server/.env
 
 # Logs
 logs/
