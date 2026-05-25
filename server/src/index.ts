@@ -148,12 +148,40 @@ async function startAutoSync() {
 
   console.log(`[SERVER] Starting auto-sync every ${SYNC_INTERVAL_MS / 1000}s`);
 
-  // Initial sync
-  try {
-    syncService.sync();
-  } catch (error) {
-    console.error('[SERVER] Initial sync failed:', error);
+  // Initial sync with retry logic for empty database
+  let initialSyncAttempts = 0;
+  const maxInitialAttempts = 3;
+
+  async function attemptInitialSync() {
+    try {
+      initialSyncAttempts++;
+      console.log(`[SERVER] Attempting initial sync (attempt ${initialSyncAttempts}/${maxInitialAttempts})...`);
+
+      if (syncService) {
+        syncService.sync();
+
+        // Check if sync was successful by verifying dashboard has data
+        const walletCount = dashboardDb.getAllWallets().length;
+
+        if (walletCount === 0 && initialSyncAttempts < maxInitialAttempts) {
+          console.warn(`[SERVER] Initial sync returned 0 wallets. Tracker may still be initializing. Retrying in 30s...`);
+          setTimeout(attemptInitialSync, 30000);
+        } else if (walletCount === 0) {
+          console.warn(`[SERVER] Initial sync still returns 0 wallets after ${maxInitialAttempts} attempts. Will continue with periodic sync.`);
+        } else {
+          console.log(`[SERVER] Initial sync successful! Dashboard has ${walletCount} wallets.`);
+        }
+      }
+    } catch (error) {
+      console.error('[SERVER] Initial sync failed:', error);
+      if (initialSyncAttempts < maxInitialAttempts) {
+        console.log(`[SERVER] Retrying in 30s...`);
+        setTimeout(attemptInitialSync, 30000);
+      }
+    }
   }
+
+  await attemptInitialSync();
 
   // Schedule periodic sync
   syncInterval = setInterval(() => {
