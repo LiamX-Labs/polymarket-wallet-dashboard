@@ -46,11 +46,12 @@ export default function App() {
       {/* Sort/Filter Controls */}
       <SortFilter sortBy={sortBy} sortOrder={sortOrder} onSort={setSorting} />
 
-      {/* Headers Row - Single row for all wallets */}
-      <div className="px-3 pt-3 pb-1 sticky top-[73px] z-10 bg-dark-bg">
-        <div className="flex gap-3">
-          {/* Today Header */}
-          <div className="flex-shrink-0 bg-red-900/20 px-3 py-1 rounded-t border-t border-x border-dark-border w-[180px] sm:w-[240px] md:w-[340px]">
+      {/* Main Content Layout - Two Column Structure */}
+      <div className="px-3 pt-3 pb-3 flex gap-3">
+        {/* Section 1: Today/Wallet Info Column */}
+        <div className="flex-shrink-0 w-[180px] sm:w-[240px] md:w-[340px]">
+          {/* Section 1 Header */}
+          <div className="bg-red-900/20 px-3 py-1 rounded-t border-t border-x border-dark-border sticky top-[73px] z-10">
             <div className="flex justify-between items-center">
               <div className="text-[10px] text-red-400 font-semibold">
                 Profit 24h / Recent Trade
@@ -61,51 +62,56 @@ export default function App() {
             </div>
           </div>
 
-          {/* Track Record Header */}
-          <div className="flex-1 min-w-0 bg-red-900/20 rounded-t border-t border-x border-dark-border overflow-x-auto">
-            <div className="px-3 py-1 flex gap-3 text-[9px] text-red-400 font-semibold min-w-max">
-              <div className="w-[70px] text-center">WR/k # trades</div>
-              <div className="w-[70px] text-center">Trades Daily/ hold time</div>
-              <div className="w-[60px] text-center">Avg $ win</div>
-              <div className="w-[60px] text-center">Avg $ loss</div>
-              <div className="w-[70px] text-center">Best Trade $/ time ago</div>
-              <div className="w-[70px] text-center">Best Perf $/ time ago</div>
-              <div className="w-[70px] text-center">Worst perf/ # wins</div>
-              <div className="w-[70px] text-center">Worst perf/ # losses</div>
-              <div className="w-[60px] text-center">Avg $ trade size</div>
-              <div className="w-[50px] text-center">Profit Factor</div>
+          {/* Section 1 Content - Wallet Cards */}
+          <div className="space-y-2">
+            {wallets.map((wallet, index) => {
+              const badge = getBadgeProps(index);
+              return (
+                <div key={wallet.wallet} className="bg-dark-panel border border-dark-border">
+                  <div className="p-2">
+                    <WalletCard
+                      wallet={wallet}
+                      badgeColor={badge.color}
+                      badgeText={badge.text}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Section 2: Track Record Column (Unified Scroll) */}
+        <div className="flex-1 min-w-0 overflow-x-auto">
+          <div className="min-w-max">
+            {/* Section 2 Header */}
+            <div className="bg-red-900/20 rounded-t border-t border-x border-dark-border">
+              <div className="px-3 py-1 flex gap-3 text-[9px] text-red-400 font-semibold">
+                <div className="w-[70px] text-center">WR/k # trades</div>
+                <div className="w-[70px] text-center">Trades Daily/ hold time</div>
+                <div className="w-[60px] text-center">Avg $ win</div>
+                <div className="w-[60px] text-center">Avg $ loss</div>
+                <div className="w-[70px] text-center">Best Trade $/ time ago</div>
+                <div className="w-[70px] text-center">Best Perf $/ time ago</div>
+                <div className="w-[70px] text-center">Worst perf/ # wins</div>
+                <div className="w-[70px] text-center">Worst perf/ # losses</div>
+                <div className="w-[60px] text-center">Avg $ trade size</div>
+                <div className="w-[50px] text-center">Profit Factor</div>
+              </div>
+            </div>
+
+            {/* Section 2 Content - Track Records */}
+            <div className="space-y-2">
+              {wallets.map((wallet) => (
+                <div key={wallet.wallet} className="bg-dark-panel border border-dark-border">
+                  <div className="py-2">
+                    <TrackRecord wallet={wallet} />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Main Content - Wallet Cards */}
-      <div className="px-3 pb-3 space-y-2">
-        {wallets.map((wallet, index) => {
-          const badge = getBadgeProps(index);
-
-          return (
-            <div key={wallet.wallet} className="flex gap-3">
-              {/* Today Section (Responsive Width) */}
-              <div className="bg-dark-panel border border-dark-border flex-shrink-0 w-[180px] sm:w-[240px] md:w-[340px]">
-                <div className="p-2">
-                  <WalletCard
-                    wallet={wallet}
-                    badgeColor={badge.color}
-                    badgeText={badge.text}
-                  />
-                </div>
-              </div>
-
-              {/* Track Record Section (Horizontally Scrollable) */}
-              <div className="bg-dark-panel border border-dark-border flex-1 min-w-0 overflow-x-auto">
-                <div className="py-2">
-                  <TrackRecord wallet={wallet} />
-                </div>
-              </div>
-            </div>
-          );
-        })}
       </div>
 
       {wallets.length === 0 && !loading && (
