@@ -49,10 +49,10 @@ export default function App() {
       {/* Main Content Layout - Two Column Structure */}
       <div className="px-3 pt-3 pb-3 flex gap-3">
         {/* Section 1: Today/Wallet Info Column */}
-        <div className="flex-shrink-0 w-[180px] sm:w-[240px] md:w-[340px]">
+        <div className="flex-shrink-0 w-[180px] sm:w-[240px] md:w-[340px] flex flex-col">
           {/* Section 1 Header */}
-          <div className="bg-red-900/20 px-3 py-1 rounded-t border-t border-x border-dark-border sticky top-[73px] z-10">
-            <div className="flex justify-between items-center">
+          <div className="bg-red-900/20 px-3 py-1 rounded-t border-t border-x border-dark-border sticky top-[73px] z-10 h-[33px] flex items-center">
+            <div className="flex justify-between items-center w-full">
               <div className="text-[10px] text-red-400 font-semibold">
                 Profit 24h / Recent Trade
               </div>
@@ -63,7 +63,7 @@ export default function App() {
           </div>
 
           {/* Section 1 Content - Wallet Cards */}
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             {wallets.map((wallet, index) => {
               const badge = getBadgeProps(index);
               return (
@@ -83,10 +83,10 @@ export default function App() {
 
         {/* Section 2: Track Record Column (Unified Scroll) */}
         <div className="flex-1 min-w-0 overflow-x-auto">
-          <div className="min-w-max">
+          <div className="min-w-max flex flex-col">
             {/* Section 2 Header */}
-            <div className="bg-red-900/20 rounded-t border-t border-x border-dark-border">
-              <div className="px-3 py-1 flex gap-3 text-[9px] text-red-400 font-semibold">
+            <div className="bg-red-900/20 rounded-t border-t border-x border-dark-border h-[33px] flex items-center">
+              <div className="px-3 py-1 flex gap-3 text-[9px] text-red-400 font-semibold w-full">
                 <div className="w-[70px] text-center">WR/k # trades</div>
                 <div className="w-[70px] text-center">Trades Daily/ hold time</div>
                 <div className="w-[60px] text-center">Avg $ win</div>
@@ -101,7 +101,7 @@ export default function App() {
             </div>
 
             {/* Section 2 Content - Track Records */}
-            <div className="space-y-2">
+            <div className="flex flex-col gap-2">
               {wallets.map((wallet) => (
                 <div key={wallet.wallet} className="bg-dark-panel border border-dark-border h-[76px] flex items-center">
                   <div className="py-2 w-full">
