@@ -88,7 +88,7 @@ export default function App() {
             <div className="bg-red-900/20 rounded-t border-t border-x border-dark-border h-[33px] flex items-center">
               <div className="px-3 py-1 flex gap-3 text-[9px] text-red-400 font-semibold w-full">
                 <div className="w-[70px] text-center">WR/k # trades</div>
-                <div className="w-[70px] text-center">Trades Daily/ hold time</div>
+                <div className="w-[70px] text-center">Trades Daily/ avg time to next</div>
                 <div className="w-[60px] text-center">Avg $ win</div>
                 <div className="w-[60px] text-center">Avg $ loss</div>
                 <div className="w-[70px] text-center">Best Trade $/ time ago</div>

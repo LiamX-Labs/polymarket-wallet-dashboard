@@ -246,11 +246,13 @@ class BTCMarketTracker:
         # Fetch closed positions and calculate performance metrics for TOP 5 wallets BEFORE saving
         logger.info(f"Fetching closed positions from Polymarket API for top {len(top_5)} wallets...")
         top_5_performance = []
+        wallet_closed_positions = {}  # Cache closed positions for later use
         for pick in top_5:
             wallet = pick["wallet"]
             try:
                 # Fetch ALL closed positions for this wallet from Polymarket API
                 positions = self.profiler.get_all_positions_7d(wallet)
+                wallet_closed_positions[wallet] = positions  # Cache for later use
                 logger.info(f"  {wallet}: fetched {len(positions)} closed positions")
 
                 # Calculate detailed P&L metrics from actual closed positions
@@ -343,7 +345,7 @@ class BTCMarketTracker:
             # Get additional data from stats
             wallet_stats = next((s for s in stats_7d if s["wallet"] == perf["wallet"]), None)
 
-            # Get position history for this wallet
+            # Get position history for this wallet (scanner observations)
             positions = self.db.conn.execute(
                 """SELECT mp.*, se.trigger_ts
                    FROM market_positions mp
@@ -353,11 +355,17 @@ class BTCMarketTracker:
                 (perf["wallet"],)
             ).fetchall()
 
-            # Calculate metrics
+            # Use cached closed positions for accurate hold time calculation
+            closed_positions = wallet_closed_positions.get(perf["wallet"], [])
+            if closed_positions:
+                avg_hold_time = self.profiler.calculate_avg_time_between_closed_positions(closed_positions)
+            else:
+                avg_hold_time = 300  # Default 5 minutes fallback
+
+            # Calculate metrics from scanner positions
             recent_position = positions[0] if positions else None
             profit_24h = sum(p["value"] for p in positions if p["trigger_ts"] >= (trigger_ts - 86400))
             avg_time_between = self._calculate_avg_time_between([dict(p) for p in positions])
-            avg_hold_time = self._calculate_avg_hold_time([dict(p) for p in positions])
 
             dashboard_data = {
                 "wallet": perf["wallet"],

@@ -327,32 +327,28 @@ export class SyncService {
   }
 
   private calculateAvgHoldTime(positions: any[]): number {
-    // Group positions by market to calculate hold time
-    const markets = new Map<string, any[]>();
+    // NOTE: This legacy method uses scanner positions, not closed positions
+    // The tracker database's wallet_dashboard_summary table now contains
+    // avg_hold_time_seconds calculated from actual closed positions via Polymarket API.
+    // This fallback should rarely be used.
 
-    for (const pos of positions) {
-      if (!markets.has(pos.market_id)) {
-        markets.set(pos.market_id, []);
-      }
-      markets.get(pos.market_id)!.push(pos);
+    if (positions.length < 2) return 300;
+
+    // Calculate time between consecutive positions as a rough approximation
+    const timestamps = positions
+      .map((p) => p.trigger_ts)
+      .filter((ts) => ts)
+      .sort((a, b) => a - b);
+
+    if (timestamps.length < 2) return 300;
+
+    const intervals = [];
+    for (let i = 1; i < timestamps.length; i++) {
+      intervals.push(timestamps[i] - timestamps[i - 1]);
     }
 
-    const holdTimes: number[] = [];
-
-    for (const [marketId, marketPositions] of markets) {
-      if (marketPositions.length < 2) continue;
-
-      // Sort by timestamp
-      marketPositions.sort((a, b) => a.trigger_ts - b.trigger_ts);
-
-      // Calculate time between entry and exit (simplified)
-      const entryTime = marketPositions[0].trigger_ts;
-      const exitTime = marketPositions[marketPositions.length - 1].trigger_ts;
-      holdTimes.push(exitTime - entryTime);
-    }
-
-    return holdTimes.length > 0
-      ? Math.floor(holdTimes.reduce((sum, val) => sum + val, 0) / holdTimes.length)
+    return intervals.length > 0
+      ? Math.floor(intervals.reduce((sum, val) => sum + val, 0) / intervals.length)
       : 300; // Default 5 minutes
   }
 

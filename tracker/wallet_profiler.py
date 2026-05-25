@@ -195,6 +195,34 @@ class WalletProfiler:
             "worst_trade": worst_trade,
         }
 
+    def calculate_avg_time_between_closed_positions(self, positions: list[dict]) -> int:
+        """
+        Calculate average time between closed positions.
+
+        This measures how long it takes on average before the next position is closed,
+        giving insight into trading frequency.
+
+        Args:
+            positions: List of closed position dictionaries from Polymarket API
+
+        Returns:
+            Average time in seconds between closed positions, or 0 if < 2 positions
+        """
+        if len(positions) < 2:
+            return 0
+
+        # Extract timestamps and sort them
+        timestamps = sorted([int(p.get("timestamp", 0) or 0) for p in positions if p.get("timestamp")])
+
+        if len(timestamps) < 2:
+            return 0
+
+        # Calculate intervals between consecutive closed positions
+        intervals = [timestamps[i] - timestamps[i - 1] for i in range(1, len(timestamps))]
+
+        # Return average interval in seconds
+        return int(sum(intervals) / len(intervals)) if intervals else 0
+
     @staticmethod
     def rank_score(wallet_stat: dict) -> float:
         # Heavily weighted toward ROI, with minor bonuses for win rate and trade count.
