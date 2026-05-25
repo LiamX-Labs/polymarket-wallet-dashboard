@@ -12,7 +12,8 @@ dotenv.config();
 const PORT = process.env.PORT || 3001;
 const TRACKER_DB_PATH = process.env.TRACKER_DB_PATH || path.join(__dirname, '../../data/tracker.sqlite3');
 const DASHBOARD_DB_PATH = process.env.DASHBOARD_DB_PATH || path.join(__dirname, '../../data/dashboard.db');
-const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+// Check for tracker updates every 30 seconds
+const SYNC_INTERVAL_MS = parseInt(process.env.SYNC_INTERVAL_MS || '30000', 10);
 
 const app = express();
 
@@ -92,6 +93,13 @@ app.get('/api/debug', (req, res) => {
   const dashboardDbExists = fs.existsSync(DASHBOARD_DB_PATH);
   const currentWalletCount = dashboardDb.getAllWallets().length;
 
+  let trackerLatestUpdate = null;
+  let needsSync = false;
+  if (syncService) {
+    trackerLatestUpdate = syncService.getLatestTrackerUpdate();
+    needsSync = syncService.needsSync();
+  }
+
   res.json({
     success: true,
     trackerDbPath: TRACKER_DB_PATH,
@@ -102,10 +110,11 @@ app.get('/api/debug', (req, res) => {
     lastSyncTime: lastSyncTime?.toISOString() || 'Never',
     lastSyncWalletCount,
     currentWalletCount,
-    syncIntervalMs: SYNC_INTERVAL_MS,
-    nextSyncIn: lastSyncTime
-      ? Math.max(0, Math.round((SYNC_INTERVAL_MS - (Date.now() - lastSyncTime.getTime())) / 1000))
-      : 'Unknown',
+    syncStrategy: 'Smart polling - only syncs when tracker has new data',
+    syncCheckIntervalMs: SYNC_INTERVAL_MS,
+    syncCheckIntervalSeconds: SYNC_INTERVAL_MS / 1000,
+    trackerLatestUpdate: trackerLatestUpdate ? new Date(trackerLatestUpdate * 1000).toISOString() : null,
+    needsSync,
     timestamp: new Date().toISOString(),
   });
 });
@@ -200,22 +209,27 @@ async function startAutoSync() {
 
   await attemptInitialSync();
 
-  // Schedule periodic sync
+  // Schedule smart polling - only sync when tracker has new data
   syncInterval = setInterval(() => {
     if (syncService) {
       try {
-        console.log('[SERVER] Running periodic sync...');
-        syncService.sync();
-        lastSyncTime = new Date();
-        lastSyncWalletCount = dashboardDb.getAllWallets().length;
-        console.log(`[SERVER] Periodic sync complete. Dashboard has ${lastSyncWalletCount} wallets. Next sync in ${SYNC_INTERVAL_MS / 1000}s`);
+        // Check if tracker has new data
+        if (syncService.needsSync()) {
+          console.log('[SERVER] Tracker has new data. Running sync...');
+          syncService.sync();
+          lastSyncTime = new Date();
+          lastSyncWalletCount = dashboardDb.getAllWallets().length;
+          console.log(`[SERVER] Sync complete. Dashboard has ${lastSyncWalletCount} wallets.`);
+        } else {
+          console.log(`[SERVER] No new tracker data. Skipping sync. (Checking again in ${SYNC_INTERVAL_MS / 1000}s)`);
+        }
       } catch (error) {
-        console.error('[SERVER] Scheduled sync failed:', error);
+        console.error('[SERVER] Scheduled sync check failed:', error);
       }
     }
   }, SYNC_INTERVAL_MS);
 
-  console.log(`[SERVER] Periodic sync scheduled. Next sync in ${SYNC_INTERVAL_MS / 1000}s`);
+  console.log(`[SERVER] Smart sync polling started. Checking for tracker updates every ${SYNC_INTERVAL_MS / 1000}s`);
 }
 
 // Start server

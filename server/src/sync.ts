@@ -5,10 +5,36 @@ import { WalletStats } from './types';
 export class SyncService {
   private trackerDb: Database.Database;
   private dashboardDb: DashboardDB;
+  private lastTrackerUpdate: number = 0;
 
   constructor(trackerDbPath: string, dashboardDbPath: string) {
     this.trackerDb = new Database(trackerDbPath, { readonly: true });
     this.dashboardDb = new DashboardDB(dashboardDbPath);
+  }
+
+  /**
+   * Check if tracker has new data since last sync
+   * Returns the latest update timestamp from tracker, or 0 if no data
+   */
+  getLatestTrackerUpdate(): number {
+    try {
+      const result = this.trackerDb
+        .prepare(`SELECT MAX(last_updated) as max_update FROM wallet_dashboard_summary`)
+        .get() as { max_update: number | null };
+
+      return result?.max_update || 0;
+    } catch (error) {
+      console.error('[SYNC] Error checking tracker update time:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Check if sync is needed (tracker has new data)
+   */
+  needsSync(): boolean {
+    const latestUpdate = this.getLatestTrackerUpdate();
+    return latestUpdate > this.lastTrackerUpdate;
   }
 
   /**
@@ -85,6 +111,9 @@ export class SyncService {
 
     const duration = Date.now() - startTime;
     console.log(`[SYNC] ${usingLegacyMethod ? 'LEGACY' : 'OPTIMIZED'} sync complete. Synced ${synced}/${wallets.length} wallets in ${duration}ms`);
+
+    // Update last tracker update timestamp
+    this.lastTrackerUpdate = this.getLatestTrackerUpdate();
 
     // Verify the data was written to the dashboard database
     try {
