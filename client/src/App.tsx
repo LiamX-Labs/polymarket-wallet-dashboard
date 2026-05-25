@@ -67,8 +67,8 @@ export default function App() {
             {wallets.map((wallet, index) => {
               const badge = getBadgeProps(index);
               return (
-                <div key={wallet.wallet} className="bg-dark-panel border border-dark-border">
-                  <div className="p-2">
+                <div key={wallet.wallet} className="bg-dark-panel border border-dark-border h-[76px] flex items-center">
+                  <div className="p-2 w-full">
                     <WalletCard
                       wallet={wallet}
                       badgeColor={badge.color}
@@ -103,8 +103,8 @@ export default function App() {
             {/* Section 2 Content - Track Records */}
             <div className="space-y-2">
               {wallets.map((wallet) => (
-                <div key={wallet.wallet} className="bg-dark-panel border border-dark-border">
-                  <div className="py-2">
+                <div key={wallet.wallet} className="bg-dark-panel border border-dark-border h-[76px] flex items-center">
+                  <div className="py-2 w-full">
                     <TrackRecord wallet={wallet} />
                   </div>
                 </div>
