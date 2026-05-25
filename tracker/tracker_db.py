@@ -82,6 +82,96 @@ class TrackerDB:
                 specialization TEXT,
                 PRIMARY KEY (wallet, as_of_date)
             );
+
+            CREATE TABLE IF NOT EXISTS wallet_pnl_metrics_7d (
+                wallet TEXT NOT NULL,
+                as_of_ts INTEGER NOT NULL,
+                total_profits REAL NOT NULL,
+                total_losses REAL NOT NULL,
+                profit_factor REAL NOT NULL,
+                num_wins INTEGER NOT NULL,
+                num_losses INTEGER NOT NULL,
+                avg_win REAL NOT NULL,
+                avg_loss REAL NOT NULL,
+                best_trade REAL NOT NULL,
+                worst_trade REAL NOT NULL,
+                PRIMARY KEY (wallet, as_of_ts)
+            );
+
+            CREATE TABLE IF NOT EXISTS top_wallet_performance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scan_event_id INTEGER NOT NULL,
+                wallet TEXT NOT NULL,
+                market_id TEXT NOT NULL,
+                side TEXT NOT NULL,
+                entry_price REAL NOT NULL,
+                size REAL NOT NULL,
+                value REAL NOT NULL,
+                rank_score REAL NOT NULL,
+                copyability_score REAL NOT NULL,
+                total_profits REAL NOT NULL,
+                total_losses REAL NOT NULL,
+                profit_factor REAL NOT NULL,
+                num_wins INTEGER NOT NULL,
+                num_losses INTEGER NOT NULL,
+                avg_win REAL NOT NULL,
+                avg_loss REAL NOT NULL,
+                best_trade REAL NOT NULL,
+                worst_trade REAL NOT NULL,
+                FOREIGN KEY (scan_event_id) REFERENCES scan_events(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_top_wallet_performance_scan
+                ON top_wallet_performance(scan_event_id);
+            CREATE INDEX IF NOT EXISTS idx_top_wallet_performance_wallet
+                ON top_wallet_performance(wallet);
+
+            -- Optimized unified wallet summary table for dashboard
+            -- Denormalized for single-query retrieval
+            CREATE TABLE IF NOT EXISTS wallet_dashboard_summary (
+                wallet TEXT PRIMARY KEY,
+
+                -- Today/Recent Activity
+                profit_24h REAL NOT NULL DEFAULT 0,
+                recent_trade_market TEXT,
+                recent_trade_side TEXT,
+                recent_trade_timestamp INTEGER,
+                recent_trade_pnl REAL,
+                avg_time_between_positions INTEGER NOT NULL DEFAULT 0,
+                last_position_timestamp INTEGER,
+
+                -- 7-Day Track Record
+                win_rate REAL NOT NULL DEFAULT 0,
+                total_trades INTEGER NOT NULL DEFAULT 0,
+                avg_trades_per_day REAL NOT NULL DEFAULT 0,
+                avg_hold_time_seconds INTEGER NOT NULL DEFAULT 0,
+
+                -- Performance Metrics from Closed Positions
+                total_profits REAL NOT NULL DEFAULT 0,
+                total_losses REAL NOT NULL DEFAULT 0,
+                profit_factor REAL NOT NULL DEFAULT 0,
+                num_wins INTEGER NOT NULL DEFAULT 0,
+                num_losses INTEGER NOT NULL DEFAULT 0,
+                avg_win REAL NOT NULL DEFAULT 0,
+                avg_loss REAL NOT NULL DEFAULT 0,
+                best_trade_amount REAL NOT NULL DEFAULT 0,
+                best_trade_time_ago INTEGER,
+                worst_trade_amount REAL NOT NULL DEFAULT 0,
+                avg_trade_size REAL NOT NULL DEFAULT 0,
+
+                -- Metadata
+                last_updated INTEGER NOT NULL,
+                scan_event_id INTEGER,
+
+                FOREIGN KEY (scan_event_id) REFERENCES scan_events(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_wallet_dashboard_updated
+                ON wallet_dashboard_summary(last_updated DESC);
+            CREATE INDEX IF NOT EXISTS idx_wallet_dashboard_profit
+                ON wallet_dashboard_summary(profit_24h DESC);
+            CREATE INDEX IF NOT EXISTS idx_wallet_dashboard_profit_factor
+                ON wallet_dashboard_summary(profit_factor DESC);
             """
         )
         self.conn.commit()
@@ -224,6 +314,118 @@ class TrackerDB:
                 )
                 for row in summary_rows
             ],
+        )
+        self.conn.commit()
+
+    def save_wallet_pnl_metrics_7d(self, metrics: Iterable[dict[str, Any]]) -> None:
+        """Save P&L metrics calculated from actual closed positions."""
+        as_of_ts = int(datetime.now(timezone.utc).timestamp())
+        self.conn.executemany(
+            """
+            INSERT OR REPLACE INTO wallet_pnl_metrics_7d
+            (wallet, as_of_ts, total_profits, total_losses, profit_factor,
+             num_wins, num_losses, avg_win, avg_loss, best_trade, worst_trade)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    m["wallet"],
+                    as_of_ts,
+                    m["total_profits"],
+                    m["total_losses"],
+                    m["profit_factor"],
+                    m["num_wins"],
+                    m["num_losses"],
+                    m["avg_win"],
+                    m["avg_loss"],
+                    m["best_trade"],
+                    m["worst_trade"],
+                )
+                for m in metrics
+            ],
+        )
+        self.conn.commit()
+
+    def save_top_wallet_performance(self, performance_data: Iterable[dict[str, Any]]) -> None:
+        """Save performance metrics for top wallets with closed positions data."""
+        self.conn.executemany(
+            """
+            INSERT INTO top_wallet_performance
+            (scan_event_id, wallet, market_id, side, entry_price, size, value,
+             rank_score, copyability_score, total_profits, total_losses, profit_factor,
+             num_wins, num_losses, avg_win, avg_loss, best_trade, worst_trade)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    p["scan_event_id"],
+                    p["wallet"],
+                    p["market_id"],
+                    p["side"],
+                    p["entry_price"],
+                    p["size"],
+                    p["value"],
+                    p["rank_score"],
+                    p["copyability_score"],
+                    p["total_profits"],
+                    p["total_losses"],
+                    p["profit_factor"],
+                    p["num_wins"],
+                    p["num_losses"],
+                    p["avg_win"],
+                    p["avg_loss"],
+                    p["best_trade"],
+                    p["worst_trade"],
+                )
+                for p in performance_data
+            ],
+        )
+        self.conn.commit()
+
+    def upsert_wallet_dashboard_summary(self, wallet_data: dict[str, Any]) -> None:
+        """
+        Upsert complete wallet data into unified dashboard summary table.
+        This is a denormalized table optimized for single-query dashboard retrieval.
+        """
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO wallet_dashboard_summary
+            (wallet, profit_24h, recent_trade_market, recent_trade_side,
+             recent_trade_timestamp, recent_trade_pnl, avg_time_between_positions,
+             last_position_timestamp, win_rate, total_trades, avg_trades_per_day,
+             avg_hold_time_seconds, total_profits, total_losses, profit_factor,
+             num_wins, num_losses, avg_win, avg_loss, best_trade_amount,
+             best_trade_time_ago, worst_trade_amount, avg_trade_size, last_updated,
+             scan_event_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                wallet_data["wallet"],
+                wallet_data.get("profit_24h", 0),
+                wallet_data.get("recent_trade_market"),
+                wallet_data.get("recent_trade_side"),
+                wallet_data.get("recent_trade_timestamp"),
+                wallet_data.get("recent_trade_pnl"),
+                wallet_data.get("avg_time_between_positions", 0),
+                wallet_data.get("last_position_timestamp"),
+                wallet_data.get("win_rate", 0),
+                wallet_data.get("total_trades", 0),
+                wallet_data.get("avg_trades_per_day", 0),
+                wallet_data.get("avg_hold_time_seconds", 0),
+                wallet_data.get("total_profits", 0),
+                wallet_data.get("total_losses", 0),
+                wallet_data.get("profit_factor", 0),
+                wallet_data.get("num_wins", 0),
+                wallet_data.get("num_losses", 0),
+                wallet_data.get("avg_win", 0),
+                wallet_data.get("avg_loss", 0),
+                wallet_data.get("best_trade_amount", 0),
+                wallet_data.get("best_trade_time_ago"),
+                wallet_data.get("worst_trade_amount", 0),
+                wallet_data.get("avg_trade_size", 0),
+                int(datetime.now(timezone.utc).timestamp()),
+                wallet_data.get("scan_event_id"),
+            ),
         )
         self.conn.commit()
 

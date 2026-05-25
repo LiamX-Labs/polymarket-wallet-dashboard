@@ -12,41 +12,62 @@ export class SyncService {
   }
 
   /**
-   * Sync wallet data from tracker database
-   * Calculates all metrics based on last 7 days of data
+   * Sync wallet data from tracker database using optimized unified summary table
+   * Performs single-query retrieval per wallet from wallet_dashboard_summary
+   * Falls back to legacy multi-query method if unified table is empty
    */
   sync(): void {
-    console.log('[SYNC] Starting wallet stats sync...');
+    console.log('[SYNC] Starting optimized wallet stats sync...');
     const startTime = Date.now();
 
     const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
     const oneDayAgo = Math.floor(Date.now() / 1000) - 24 * 60 * 60;
 
-    // Get all unique wallets from the last 7 days
-    // NOTE: If no wallets found in last 7 days, we'll sync ALL wallets
+    // Try to get wallets from unified dashboard summary table (optimized path)
     let wallets = this.trackerDb
       .prepare(
-        `SELECT DISTINCT wallet
-         FROM wallet_stats_7d
-         WHERE as_of_ts >= ?`
+        `SELECT wallet FROM wallet_dashboard_summary
+         WHERE last_updated >= ?
+         ORDER BY last_updated DESC`
       )
       .all(sevenDaysAgo) as Array<{ wallet: string }>;
 
-    console.log(`[SYNC] Found ${wallets.length} unique wallets in the last 7 days`);
-
-    // Fallback: If no recent data, sync all wallets
+    // Fallback: If no recent data, try all wallets from summary table
     if (wallets.length === 0) {
-      console.log('[SYNC] No wallets found in last 7 days, syncing ALL wallets from database...');
       wallets = this.trackerDb
-        .prepare(`SELECT DISTINCT wallet FROM wallet_stats_7d`)
+        .prepare(`SELECT wallet FROM wallet_dashboard_summary ORDER BY last_updated DESC`)
         .all() as Array<{ wallet: string }>;
-      console.log(`[SYNC] Found ${wallets.length} total wallets in database`);
     }
+
+    // Fallback to legacy method if unified table is empty
+    let usingLegacyMethod = false;
+    if (wallets.length === 0) {
+      console.log('[SYNC] Unified summary table empty, falling back to legacy multi-query method...');
+      wallets = this.trackerDb
+        .prepare(
+          `SELECT DISTINCT wallet
+           FROM wallet_stats_7d
+           WHERE as_of_ts >= ?`
+        )
+        .all(sevenDaysAgo) as Array<{ wallet: string }>;
+      usingLegacyMethod = true;
+
+      if (wallets.length === 0) {
+        wallets = this.trackerDb
+          .prepare(`SELECT DISTINCT wallet FROM wallet_stats_7d`)
+          .all() as Array<{ wallet: string }>;
+      }
+    }
+
+    console.log(`[SYNC] Found ${wallets.length} wallets (${usingLegacyMethod ? 'LEGACY' : 'OPTIMIZED'} method)`);
 
     let synced = 0;
     for (const { wallet } of wallets) {
       try {
-        const stats = this.calculateWalletStats(wallet, sevenDaysAgo, oneDayAgo);
+        const stats = usingLegacyMethod
+          ? this.calculateWalletStats(wallet, sevenDaysAgo, oneDayAgo)
+          : this.getWalletStatsOptimized(wallet);
+
         if (stats) {
           this.dashboardDb.upsertWalletStats(stats);
           synced++;
@@ -57,9 +78,59 @@ export class SyncService {
     }
 
     const duration = Date.now() - startTime;
-    console.log(`[SYNC] Complete. Synced ${synced}/${wallets.length} wallets in ${duration}ms`);
+    console.log(`[SYNC] ${usingLegacyMethod ? 'LEGACY' : 'OPTIMIZED'} sync complete. Synced ${synced}/${wallets.length} wallets in ${duration}ms`);
   }
 
+  /**
+   * Optimized single-query retrieval from unified wallet_dashboard_summary table
+   * All metrics are pre-calculated by the tracker, eliminating need for joins
+   */
+  private getWalletStatsOptimized(wallet: string): WalletStats | null {
+    const summary = this.trackerDb
+      .prepare(`SELECT * FROM wallet_dashboard_summary WHERE wallet = ?`)
+      .get(wallet) as any;
+
+    if (!summary) return null;
+
+    // Direct mapping from unified summary table to WalletStats
+    const stats: WalletStats = {
+      wallet,
+
+      // Today/Recent Activity
+      profit_24h: summary.profit_24h || 0,
+      recent_trade_market: summary.recent_trade_market || null,
+      recent_trade_side: summary.recent_trade_side || null,
+      recent_trade_timestamp: summary.recent_trade_timestamp || null,
+      recent_trade_pnl: summary.recent_trade_pnl || null,
+      avg_time_between_positions: summary.avg_time_between_positions || 0,
+      last_position_timestamp: summary.last_position_timestamp || null,
+
+      // 7-Day Track Record
+      win_rate: summary.win_rate || 0,
+      total_trades: summary.total_trades || 0,
+      avg_trades_per_day: summary.avg_trades_per_day || 0,
+      avg_hold_time_seconds: summary.avg_hold_time_seconds || 0,
+
+      // Performance Metrics from Closed Positions
+      avg_win: summary.avg_win || 0,
+      avg_loss: summary.avg_loss || 0,
+      best_trade_amount: summary.best_trade_amount || 0,
+      best_trade_time_ago: summary.best_trade_time_ago || null,
+      best_perf_amount: summary.best_trade_amount || 0, // Same as best trade
+      best_perf_time_ago: summary.best_trade_time_ago || null,
+      worst_perf_amount: summary.worst_trade_amount || 0,
+      num_wins: summary.num_wins || 0,
+      num_losses: summary.num_losses || 0,
+      avg_trade_size: summary.avg_trade_size || 0,
+      profit_factor: summary.profit_factor || 0,
+
+      last_updated: summary.last_updated || Math.floor(Date.now() / 1000),
+    };
+
+    return stats;
+  }
+
+  // Legacy method kept for fallback - no longer used in primary sync path
   private calculateWalletStats(
     wallet: string,
     sevenDaysAgo: number,
@@ -103,17 +174,53 @@ export class SyncService {
     // Calculate average time between positions
     const avgTimeBetween = this.calculateAvgTimeBetween(positions);
 
-    // Calculate wins/losses from top_wallet_picks performance
-    const { numWins, numLosses, avgWin, avgLoss, bestTrade, worstPerf } =
-      this.calculateWinLossMetrics(wallet, sevenDaysAgo);
+    // Get actual P&L metrics from top_wallet_performance table (preferred)
+    // This contains performance metrics calculated from real closed positions
+    const performanceMetrics = this.trackerDb
+      .prepare(
+        `SELECT * FROM top_wallet_performance
+         WHERE wallet = ?
+         ORDER BY id DESC
+         LIMIT 1`
+      )
+      .get(wallet) as any;
+
+    // Use actual P&L metrics if available, otherwise fall back to estimates
+    let numWins, numLosses, avgWin, avgLoss, bestTrade, worstPerf, profitFactor;
+
+    if (performanceMetrics) {
+      // Use actual metrics from closed positions (top_wallet_performance table)
+      numWins = performanceMetrics.num_wins;
+      numLosses = performanceMetrics.num_losses;
+      avgWin = performanceMetrics.avg_win;
+      avgLoss = performanceMetrics.avg_loss;
+      profitFactor = performanceMetrics.profit_factor;
+      bestTrade = {
+        amount: performanceMetrics.best_trade,
+        timestamp: latestStats.as_of_ts,
+      };
+      worstPerf = {
+        amount: performanceMetrics.worst_trade,
+        timestamp: latestStats.as_of_ts,
+      };
+    } else {
+      // Fall back to estimated metrics from top_wallet_picks
+      const estimates = this.calculateWinLossMetrics(wallet, sevenDaysAgo);
+      numWins = estimates.numWins;
+      numLosses = estimates.numLosses;
+      avgWin = estimates.avgWin;
+      avgLoss = estimates.avgLoss;
+      bestTrade = estimates.bestTrade;
+      worstPerf = estimates.worstPerf;
+
+      // Calculate profit factor from estimates
+      const totalProfits = numWins * avgWin;
+      const totalLosses = Math.abs(numLosses * avgLoss);
+      profitFactor = totalLosses > 0 ? totalProfits / totalLosses : 0;
+    }
 
     // Calculate average trade size
     const avgTradeSize = latestStats.avg_trade_size || 0;
-
-    // Calculate profit factor
-    const totalWins = numWins * avgWin;
-    const totalLosses = Math.abs(numLosses * avgLoss);
-    const profitFactor = totalLosses > 0 ? totalWins / totalLosses : 0;
 
     const stats: WalletStats = {
       wallet,

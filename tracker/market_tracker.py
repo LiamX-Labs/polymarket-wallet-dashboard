@@ -243,8 +243,76 @@ class BTCMarketTracker:
             len(top_5),
         )
 
+        # Fetch closed positions and calculate performance metrics for TOP 5 wallets BEFORE saving
+        logger.info(f"Fetching closed positions from Polymarket API for top {len(top_5)} wallets...")
+        top_5_performance = []
+        for pick in top_5:
+            wallet = pick["wallet"]
+            try:
+                # Fetch ALL closed positions for this wallet from Polymarket API
+                positions = self.profiler.get_all_positions_7d(wallet)
+                logger.info(f"  {wallet}: fetched {len(positions)} closed positions")
+
+                # Calculate detailed P&L metrics from actual closed positions
+                metrics = self.profiler.calculate_pnl_metrics(positions)
+
+                # Combine pick data with performance metrics
+                performance = {
+                    "wallet": wallet,
+                    "scan_event_id": None,  # Will be set after scan_event is created
+                    "market_id": market.market_id,
+                    "side": pick["side"],
+                    "entry_price": pick["entry_price"],
+                    "size": pick["size"],
+                    "value": pick["value"],
+                    "rank_score": pick["rank_score"],
+                    "copyability_score": pick["copyability_score"],
+                    # Performance metrics from closed positions
+                    "total_profits": metrics["total_profits"],
+                    "total_losses": metrics["total_losses"],
+                    "profit_factor": metrics["profit_factor"],
+                    "num_wins": metrics["num_wins"],
+                    "num_losses": metrics["num_losses"],
+                    "avg_win": metrics["avg_win"],
+                    "avg_loss": metrics["avg_loss"],
+                    "best_trade": metrics["best_trade"],
+                    "worst_trade": metrics["worst_trade"],
+                }
+                top_5_performance.append(performance)
+            except Exception as e:
+                logger.error(f"Failed to fetch/calculate performance for {wallet}: {e}")
+                # Still include wallet but with zero metrics
+                top_5_performance.append({
+                    "wallet": wallet,
+                    "scan_event_id": None,
+                    "market_id": market.market_id,
+                    "side": pick["side"],
+                    "entry_price": pick["entry_price"],
+                    "size": pick["size"],
+                    "value": pick["value"],
+                    "rank_score": pick["rank_score"],
+                    "copyability_score": pick["copyability_score"],
+                    "total_profits": 0.0,
+                    "total_losses": 0.0,
+                    "profit_factor": 0.0,
+                    "num_wins": 0,
+                    "num_losses": 0,
+                    "avg_win": 0.0,
+                    "avg_loss": 0.0,
+                    "best_trade": 0.0,
+                    "worst_trade": 0.0,
+                })
+
+        logger.info(f"Calculated performance metrics for {len(top_5_performance)} wallets")
+
         # Save to database
         scan_event_id = self.db.create_scan_event(market.market_id, trigger_ts, progress_pct)
+
+        # Update scan_event_id in performance data
+        for perf in top_5_performance:
+            perf["scan_event_id"] = scan_event_id
+
+        # Save positions
         self.db.save_positions(
             scan_event_id,
             [
@@ -258,8 +326,75 @@ class BTCMarketTracker:
                 for p in top_5
             ],
         )
+
+        # Save wallet stats (for all wallets that were profiled)
         self.db.save_wallet_stats_7d(stats_7d)
+
+        # Save top wallet picks
         self.db.save_top_wallet_picks(scan_event_id, top_5, market.timeframe)
+
+        # Save performance metrics for top 5 wallets
+        self.db.save_top_wallet_performance(top_5_performance)
+        logger.info(f"Saved performance metrics for top {len(top_5_performance)} wallets")
+
+        # Update unified dashboard summary table for optimized retrieval
+        # This combines all data needed by the dashboard in a single denormalized table
+        for perf in top_5_performance:
+            # Get additional data from stats
+            wallet_stats = next((s for s in stats_7d if s["wallet"] == perf["wallet"]), None)
+
+            # Get position history for this wallet
+            positions = self.db.conn.execute(
+                """SELECT mp.*, se.trigger_ts
+                   FROM market_positions mp
+                   JOIN scan_events se ON mp.scan_event_id = se.id
+                   WHERE mp.wallet = ?
+                   ORDER BY se.trigger_ts DESC""",
+                (perf["wallet"],)
+            ).fetchall()
+
+            # Calculate metrics
+            recent_position = positions[0] if positions else None
+            profit_24h = sum(p["value"] for p in positions if p["trigger_ts"] >= (trigger_ts - 86400))
+            avg_time_between = self._calculate_avg_time_between([dict(p) for p in positions])
+            avg_hold_time = self._calculate_avg_hold_time([dict(p) for p in positions])
+
+            dashboard_data = {
+                "wallet": perf["wallet"],
+                "scan_event_id": scan_event_id,
+
+                # Recent activity
+                "profit_24h": profit_24h,
+                "recent_trade_market": market.title if recent_position else None,
+                "recent_trade_side": recent_position["side"] if recent_position else None,
+                "recent_trade_timestamp": recent_position["trigger_ts"] if recent_position else None,
+                "recent_trade_pnl": recent_position["value"] * 0.05 if recent_position else None,  # Estimate
+                "avg_time_between_positions": avg_time_between,
+                "last_position_timestamp": recent_position["trigger_ts"] if recent_position else None,
+
+                # Track record
+                "win_rate": wallet_stats["win_rate"] if wallet_stats else 0,
+                "total_trades": wallet_stats["trade_count"] if wallet_stats else 0,
+                "avg_trades_per_day": wallet_stats["trade_count"] / 7 if wallet_stats else 0,
+                "avg_hold_time_seconds": avg_hold_time,
+                "avg_trade_size": wallet_stats["avg_trade_size"] if wallet_stats else 0,
+
+                # Performance metrics from closed positions
+                "total_profits": perf["total_profits"],
+                "total_losses": perf["total_losses"],
+                "profit_factor": perf["profit_factor"],
+                "num_wins": perf["num_wins"],
+                "num_losses": perf["num_losses"],
+                "avg_win": perf["avg_win"],
+                "avg_loss": perf["avg_loss"],
+                "best_trade_amount": perf["best_trade"],
+                "best_trade_time_ago": recent_position["trigger_ts"] if recent_position else None,
+                "worst_trade_amount": perf["worst_trade"],
+            }
+
+            self.db.upsert_wallet_dashboard_summary(dashboard_data)
+
+        logger.info(f"Updated dashboard summary for {len(top_5_performance)} wallets")
 
         # Send Telegram alert with top 5
         alert_payload = {
@@ -293,6 +428,30 @@ class BTCMarketTracker:
         report = run_daily_report(self.db, self.profiler, now)
         await self.notifier.send_daily_report(report)
         self._last_daily_report_date = day_key
+
+    def _calculate_avg_time_between(self, positions: list[dict]) -> int:
+        """Calculate average time between positions"""
+        if len(positions) < 2:
+            return 0
+        timestamps = sorted([p["trigger_ts"] for p in positions])
+        intervals = [timestamps[i] - timestamps[i-1] for i in range(1, len(timestamps))]
+        return int(sum(intervals) / len(intervals)) if intervals else 0
+
+    def _calculate_avg_hold_time(self, positions: list[dict]) -> int:
+        """Calculate average hold time (simplified estimate)"""
+        # Group by market and calculate time between first and last position
+        from collections import defaultdict
+        by_market = defaultdict(list)
+        for p in positions:
+            by_market[p.get("market_id", "unknown")].append(p["trigger_ts"])
+
+        hold_times = []
+        for market_positions in by_market.values():
+            if len(market_positions) >= 2:
+                market_positions.sort()
+                hold_times.append(market_positions[-1] - market_positions[0])
+
+        return int(sum(hold_times) / len(hold_times)) if hold_times else 300
 
 
 def main() -> None:

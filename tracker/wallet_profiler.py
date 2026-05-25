@@ -127,6 +127,74 @@ class WalletProfiler:
             results.append(stat)
         return results
 
+    def get_all_positions_7d(self, wallet: str) -> list[dict]:
+        """
+        Fetch ALL closed positions (all markets) for a wallet in the last 7 days.
+        Returns list of position dictionaries from Polymarket API.
+        """
+        cutoff = int((datetime.utcnow() - timedelta(days=7)).timestamp())
+        return self.fetcher.get_all_closed_positions(wallet, cutoff_timestamp=cutoff)
+
+    def calculate_pnl_metrics(self, positions: list[dict]) -> dict:
+        """
+        Calculate detailed P&L metrics from closed positions.
+
+        Returns:
+            dict with keys:
+                - total_profits: sum of all winning positions
+                - total_losses: absolute value of sum of all losing positions
+                - profit_factor: total_profits / total_losses
+                - num_wins: count of winning positions
+                - num_losses: count of losing positions
+                - avg_win: average profit per winning position
+                - avg_loss: average loss per losing position
+                - best_trade: largest single winning position
+                - worst_trade: largest single losing position
+        """
+        if not positions:
+            return {
+                "total_profits": 0.0,
+                "total_losses": 0.0,
+                "profit_factor": 0.0,
+                "num_wins": 0,
+                "num_losses": 0,
+                "avg_win": 0.0,
+                "avg_loss": 0.0,
+                "best_trade": 0.0,
+                "worst_trade": 0.0,
+            }
+
+        pnl_values = [float(p.get("realizedPnl", 0) or 0) for p in positions]
+
+        winning_positions = [pnl for pnl in pnl_values if pnl > 0]
+        losing_positions = [pnl for pnl in pnl_values if pnl < 0]
+
+        total_profits = sum(winning_positions) if winning_positions else 0.0
+        total_losses = abs(sum(losing_positions)) if losing_positions else 0.0
+
+        profit_factor = (total_profits / total_losses) if total_losses > 0 else 0.0
+
+        num_wins = len(winning_positions)
+        num_losses = len(losing_positions)
+
+        avg_win = (total_profits / num_wins) if num_wins > 0 else 0.0
+        avg_loss = (total_losses / num_losses) if num_losses > 0 else 0.0
+
+        best_trade = max(winning_positions) if winning_positions else 0.0
+        worst_trade = min(losing_positions) if losing_positions else 0.0
+
+        return {
+            "total_profits": total_profits,
+            "total_losses": total_losses,
+            "profit_factor": profit_factor,
+            "num_wins": num_wins,
+            "num_losses": num_losses,
+            "avg_win": avg_win,
+            "avg_loss": avg_loss,
+            "best_trade": best_trade,
+            "worst_trade": worst_trade,
+        }
+
     @staticmethod
     def rank_score(wallet_stat: dict) -> float:
         # Heavily weighted toward ROI, with minor bonuses for win rate and trade count.
