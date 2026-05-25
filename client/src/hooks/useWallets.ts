@@ -23,8 +23,9 @@ export function useWallets(): UseWalletsResult {
       setLoading(true);
       setError(null);
 
+      const apiUrl = import.meta.env.VITE_API_URL || '';
       const response = await fetch(
-        `/api/wallets?sort=${sortBy}&order=${sortOrder}`
+        `${apiUrl}/api/wallets?sort=${sortBy}&order=${sortOrder}`
       );
 
       if (!response.ok) {
