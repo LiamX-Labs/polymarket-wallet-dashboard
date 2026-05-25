@@ -27,10 +27,28 @@ if (!fs.existsSync(dashboardDbDir)) {
   console.log(`[SERVER] Created dashboard database directory: ${dashboardDbDir}`);
 }
 
+// Wait for tracker database to be created by the tracker
+async function waitForTrackerDb(maxWaitSeconds = 60) {
+  const startTime = Date.now();
+  while (!fs.existsSync(TRACKER_DB_PATH)) {
+    const elapsed = (Date.now() - startTime) / 1000;
+    if (elapsed > maxWaitSeconds) {
+      console.warn(`[SERVER] Tracker database not found after ${maxWaitSeconds}s: ${TRACKER_DB_PATH}`);
+      console.warn(`[SERVER] Server will start anyway. Sync will fail until tracker creates the database.`);
+      break;
+    }
+    console.log(`[SERVER] Waiting for tracker database... (${elapsed.toFixed(0)}s)`);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  if (fs.existsSync(TRACKER_DB_PATH)) {
+    console.log(`[SERVER] Tracker database found: ${TRACKER_DB_PATH}`);
+  }
+}
+
 // Initialize databases
 // NOTE: Tracker DB is opened READ-ONLY, Dashboard DB is a SEPARATE database
 const dashboardDb = new DashboardDB(DASHBOARD_DB_PATH);
-const syncService = new SyncService(TRACKER_DB_PATH, DASHBOARD_DB_PATH);
+let syncService: SyncService | null = null;
 
 // Routes
 app.use('/api/wallets', createWalletsRouter(dashboardDb));
@@ -46,6 +64,13 @@ app.get('/api/health', (req, res) => {
 
 // Manual sync endpoint
 app.post('/api/sync', (req, res) => {
+  if (!syncService) {
+    res.status(503).json({
+      success: false,
+      error: 'Sync service not initialized - tracker database not available yet',
+    });
+    return;
+  }
   try {
     syncService.sync();
     res.json({
@@ -64,7 +89,12 @@ app.post('/api/sync', (req, res) => {
 // Auto-sync every 5 minutes
 let syncInterval: NodeJS.Timeout;
 
-function startAutoSync() {
+async function startAutoSync() {
+  if (!syncService) {
+    console.warn('[SERVER] Cannot start auto-sync: sync service not initialized');
+    return;
+  }
+
   console.log(`[SERVER] Starting auto-sync every ${SYNC_INTERVAL_MS / 1000}s`);
 
   // Initial sync
@@ -76,16 +106,18 @@ function startAutoSync() {
 
   // Schedule periodic sync
   syncInterval = setInterval(() => {
-    try {
-      syncService.sync();
-    } catch (error) {
-      console.error('[SERVER] Scheduled sync failed:', error);
+    if (syncService) {
+      try {
+        syncService.sync();
+      } catch (error) {
+        console.error('[SERVER] Scheduled sync failed:', error);
+      }
     }
   }, SYNC_INTERVAL_MS);
 }
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`[SERVER] Running on http://localhost:${PORT}`);
   console.log(`[SERVER] ========================================`);
   console.log(`[SERVER] Tracker DB (READ-ONLY):   ${TRACKER_DB_PATH}`);
@@ -95,14 +127,27 @@ app.listen(PORT, () => {
   console.log(`[SERVER]       Tracker database is never modified (read-only).`);
   console.log(`[SERVER] ========================================`);
 
-  startAutoSync();
+  // Wait for tracker database then initialize sync service
+  await waitForTrackerDb();
+
+  try {
+    syncService = new SyncService(TRACKER_DB_PATH, DASHBOARD_DB_PATH);
+    await startAutoSync();
+  } catch (error) {
+    console.error('[SERVER] Failed to initialize sync service:', error);
+    console.warn('[SERVER] Server will continue running but sync is disabled');
+  }
 });
 
 // Graceful shutdown
 process.on('SIGINT', () => {
   console.log('\n[SERVER] Shutting down gracefully...');
-  clearInterval(syncInterval);
+  if (syncInterval) {
+    clearInterval(syncInterval);
+  }
   dashboardDb.close();
-  syncService.close();
+  if (syncService) {
+    syncService.close();
+  }
   process.exit(0);
 });

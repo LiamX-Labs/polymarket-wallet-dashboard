@@ -14,7 +14,8 @@ services:
       cd server && npm install
     startCommand: |
       mkdir -p /tmp &&
-      python market_tracker.py &
+      python3 market_tracker.py &
+      sleep 10 &&
       cd server && npm run dev
     envVars:
       - key: PORT
