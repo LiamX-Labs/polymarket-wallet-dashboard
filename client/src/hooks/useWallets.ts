@@ -15,7 +15,7 @@ export function useWallets(): UseWalletsResult {
   const [wallets, setWallets] = useState<WalletStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<SortField>('profit_24h');
+  const [sortBy, setSortBy] = useState<SortField>('last_updated');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
 
   const fetchWallets = useCallback(async () => {

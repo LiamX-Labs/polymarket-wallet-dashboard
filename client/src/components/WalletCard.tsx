@@ -51,16 +51,16 @@ export function WalletCard({ wallet, badgeColor, badgeText }: WalletCardProps) {
   const profitColor = wallet.profit_24h >= 0 ? 'text-accent-green' : 'text-accent-red';
 
   return (
-    <div className="flex items-center gap-2.5 py-1">
+    <div className="flex items-center gap-1.5 sm:gap-2.5 py-1">
       {/* Left: Badge and Wallet Address */}
       <div className="flex flex-col items-center gap-0.5">
         <div
-          className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0"
+          className="w-7 h-7 sm:w-9 sm:h-9 md:w-10 md:h-10 rounded-full flex items-center justify-center text-white font-bold text-[10px] sm:text-xs md:text-sm flex-shrink-0"
           style={{ backgroundColor: badgeColor }}
         >
           {badgeText}
         </div>
-        <div className="text-[10px]">
+        <div className="text-[8px] sm:text-[9px] md:text-[10px]">
           <WalletAddress address={wallet.wallet} />
         </div>
       </div>
@@ -68,13 +68,13 @@ export function WalletCard({ wallet, badgeColor, badgeText }: WalletCardProps) {
       {/* Center: Profit, Trade Info, PnL - All in one column */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* 24h Profit */}
-        <div className={`text-base font-bold leading-tight ${profitColor}`}>
+        <div className={`text-xs sm:text-sm md:text-base font-bold leading-tight ${profitColor}`}>
           {formatCurrency(wallet.profit_24h)}
         </div>
 
         {/* Recent Trade Market and Side with PnL */}
-        <div className="flex items-center gap-1.5 text-[10px] leading-tight">
-          <span className="text-gray-400">
+        <div className="flex items-center gap-0.5 sm:gap-1 md:gap-1.5 text-[8px] sm:text-[9px] md:text-[10px] leading-tight">
+          <span className="text-gray-400 truncate">
             {wallet.recent_trade_market ? (
               <>
                 {wallet.recent_trade_market.split(' ').slice(0, 2).join(' ')} ({wallet.recent_trade_side?.toLowerCase()})
@@ -83,26 +83,26 @@ export function WalletCard({ wallet, badgeColor, badgeText }: WalletCardProps) {
               'No trades'
             )}
           </span>
-          <span className={`text-sm font-semibold ${pnlColor}`}>
+          <span className={`text-[10px] sm:text-xs md:text-sm font-semibold ${pnlColor} flex-shrink-0`}>
             {wallet.recent_trade_pnl ? formatCurrency(wallet.recent_trade_pnl) : '$0.0'}
           </span>
         </div>
 
         {/* Time ago */}
-        <div className="text-[10px] text-gray-500 leading-tight">
+        <div className="text-[8px] sm:text-[9px] md:text-[10px] text-gray-500 leading-tight">
           {formatTimeAgo(wallet.recent_trade_timestamp)}
         </div>
       </div>
 
       {/* Right: Next Trade Time and Button */}
-      <div className="flex flex-col items-end gap-1">
-        <div className="text-xs font-medium text-gray-300">
+      <div className="flex flex-col items-end gap-0.5 sm:gap-1">
+        <div className="text-[10px] sm:text-xs font-medium text-gray-300">
           {getNextTradeIn(
             wallet.avg_time_between_positions,
             wallet.last_position_timestamp
           )}
         </div>
-        <button className="px-2 py-0.5 text-[10px] bg-purple-900/30 hover:bg-purple-800/40 border border-purple-700/50 rounded transition-colors text-purple-200 whitespace-nowrap">
+        <button className="px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] md:text-[10px] bg-purple-900/30 hover:bg-purple-800/40 border border-purple-700/50 rounded transition-colors text-purple-200 whitespace-nowrap">
           StakeBet [ ]&gt;
         </button>
       </div>

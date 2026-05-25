@@ -98,11 +98,9 @@ export default function App() {
               </div>
 
               {/* Track Record Section (Horizontally Scrollable) */}
-              <div className="bg-dark-panel border border-dark-border flex-1 min-w-0">
-                <div className="overflow-x-auto">
-                  <div className="py-2">
-                    <TrackRecord wallet={wallet} />
-                  </div>
+              <div className="bg-dark-panel border border-dark-border flex-1 min-w-0 overflow-x-auto">
+                <div className="py-2">
+                  <TrackRecord wallet={wallet} />
                 </div>
               </div>
             </div>

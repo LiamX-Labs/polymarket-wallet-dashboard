@@ -8,6 +8,8 @@ interface SortFilterProps {
 
 export function SortFilter({ sortBy, sortOrder, onSort }: SortFilterProps) {
   const sortOptions: { label: string; field: SortField }[] = [
+    { label: 'Last Updated', field: 'last_updated' },
+    { label: 'Latest Trade', field: 'recent_trade_timestamp' },
     { label: '24h Profit', field: 'profit_24h' },
     { label: 'Win Rate', field: 'win_rate' },
     { label: 'Total Trades', field: 'total_trades' },
