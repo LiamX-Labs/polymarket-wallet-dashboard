@@ -22,6 +22,8 @@ services:
         value: 10000
       - key: NODE_ENV
         value: production
+      - key: CORS_ORIGIN
+        value: https://polymarket-dashboard-client.onrender.com
       # Tracker settings
       - key: TRACKER_POLL_INTERVAL_SECONDS
         value: 15

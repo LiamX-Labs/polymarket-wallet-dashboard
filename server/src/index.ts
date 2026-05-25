@@ -16,8 +16,13 @@ const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 const app = express();
 
-// Middleware
-app.use(cors());
+// Middleware - Configure CORS to allow frontend access
+const corsOptions = {
+  origin: process.env.CORS_ORIGIN || '*',
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Ensure dashboard database directory exists
@@ -52,6 +57,21 @@ let syncService: SyncService | null = null;
 
 // Routes
 app.use('/api/wallets', createWalletsRouter(dashboardDb));
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Polymarket Wallet Dashboard API',
+    version: '1.0.0',
+    status: 'running',
+    endpoints: [
+      'GET /api/health',
+      'GET /api/wallets',
+      'GET /api/wallets/:address',
+      'POST /api/sync'
+    ]
+  });
+});
 
 // Health check
 app.get('/api/health', (req, res) => {
