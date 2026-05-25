@@ -10,9 +10,10 @@ services:
     plan: free
     region: oregon
     buildCommand: |
-      pip install python-dotenv aiohttp requests &&
+      pip install -r requirements.txt &&
       cd server && npm install
     startCommand: |
+      mkdir -p /tmp &&
       python market_tracker.py &
       cd server && npm run dev
     envVars:
