@@ -58,7 +58,7 @@ services:
     staticPublishPath: ./client/dist
     envVars:
       - key: VITE_API_URL
-        value: https://polymarket-dashboard-api.onrender.com
+        value: https://polymarket-dashboard-api-fkt0.onrender.com
     routes:
       - type: rewrite
         source: /*

@@ -106,6 +106,21 @@ app.post('/api/sync', (req, res) => {
   }
 });
 
+// Catch-all 404 handler - MUST come after all valid routes
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: `Route ${req.method} ${req.originalUrl} not found`,
+    availableEndpoints: [
+      'GET /',
+      'GET /api/health',
+      'GET /api/wallets',
+      'GET /api/wallets/:address',
+      'POST /api/sync'
+    ]
+  });
+});
+
 // Auto-sync every 5 minutes
 let syncInterval: NodeJS.Timeout;
 
