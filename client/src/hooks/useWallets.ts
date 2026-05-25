@@ -30,7 +30,11 @@ export function useWallets(): UseWalletsResult {
       }
 
       const url = `${apiUrl}/api/wallets?sort=${sortBy}&order=${sortOrder}`;
-      console.log('Fetching from:', url);
+      console.log('[useWallets] Environment:', {
+        VITE_API_URL: import.meta.env.VITE_API_URL,
+        apiUrl,
+        fetchUrl: url
+      });
 
       const response = await fetch(url);
 

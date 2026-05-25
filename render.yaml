@@ -56,10 +56,7 @@ services:
     staticPublishPath: ./client/dist
     envVars:
       - key: VITE_API_URL
-        fromService:
-          type: web
-          name: polymarket-dashboard-api
-          property: hostport
+        value: https://polymarket-dashboard-api.onrender.com
     routes:
       - type: rewrite
         source: /*

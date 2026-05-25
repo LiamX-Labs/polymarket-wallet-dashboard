@@ -37,13 +37,14 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# Environment variables (NEVER commit actual .env files)
-.env
+# Environment variables (NEVER commit actual .env files with secrets)
+/.env
 .env.local
 .env.*.local
 .env.tracker
 .env.tracker.local
 server/.env
+# Note: client/.env is NOT ignored because it contains public API URL for Render
 
 # Logs
 logs/
