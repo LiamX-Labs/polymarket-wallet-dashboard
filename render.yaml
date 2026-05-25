@@ -11,10 +11,10 @@ services:
     region: oregon
     buildCommand: |
       pip install python-dotenv aiohttp requests &&
-      cd server && npm install && npm run build
+      cd server && npm install
     startCommand: |
       python market_tracker.py &
-      cd server && npm start
+      cd server && npm run dev
     envVars:
       - key: PORT
         value: 10000
