@@ -8,6 +8,7 @@ services:
     name: polymarket-dashboard-api
     runtime: node
     plan: free
+    region: oregon
     buildCommand: |
       pip install python-dotenv aiohttp requests &&
       cd server && npm install && npm run build
