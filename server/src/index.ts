@@ -82,10 +82,15 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Track last sync time
+let lastSyncTime: Date | null = null;
+let lastSyncWalletCount = 0;
+
 // Debug endpoint to check sync status
 app.get('/api/debug', (req, res) => {
   const trackerDbExists = fs.existsSync(TRACKER_DB_PATH);
   const dashboardDbExists = fs.existsSync(DASHBOARD_DB_PATH);
+  const currentWalletCount = dashboardDb.getAllWallets().length;
 
   res.json({
     success: true,
@@ -94,6 +99,13 @@ app.get('/api/debug', (req, res) => {
     dashboardDbPath: DASHBOARD_DB_PATH,
     dashboardDbExists,
     syncServiceInitialized: syncService !== null,
+    lastSyncTime: lastSyncTime?.toISOString() || 'Never',
+    lastSyncWalletCount,
+    currentWalletCount,
+    syncIntervalMs: SYNC_INTERVAL_MS,
+    nextSyncIn: lastSyncTime
+      ? Math.max(0, Math.round((SYNC_INTERVAL_MS - (Date.now() - lastSyncTime.getTime())) / 1000))
+      : 'Unknown',
     timestamp: new Date().toISOString(),
   });
 });
@@ -109,9 +121,12 @@ app.post('/api/sync', (req, res) => {
   }
   try {
     syncService.sync();
+    lastSyncTime = new Date();
+    lastSyncWalletCount = dashboardDb.getAllWallets().length;
     res.json({
       success: true,
       message: 'Sync completed successfully',
+      walletCount: lastSyncWalletCount,
     });
   } catch (error) {
     console.error('Manual sync failed:', error);
@@ -159,9 +174,11 @@ async function startAutoSync() {
 
       if (syncService) {
         syncService.sync();
+        lastSyncTime = new Date();
 
         // Check if sync was successful by verifying dashboard has data
         const walletCount = dashboardDb.getAllWallets().length;
+        lastSyncWalletCount = walletCount;
 
         if (walletCount === 0 && initialSyncAttempts < maxInitialAttempts) {
           console.warn(`[SERVER] Initial sync returned 0 wallets. Tracker may still be initializing. Retrying in 30s...`);
@@ -187,12 +204,18 @@ async function startAutoSync() {
   syncInterval = setInterval(() => {
     if (syncService) {
       try {
+        console.log('[SERVER] Running periodic sync...');
         syncService.sync();
+        lastSyncTime = new Date();
+        lastSyncWalletCount = dashboardDb.getAllWallets().length;
+        console.log(`[SERVER] Periodic sync complete. Dashboard has ${lastSyncWalletCount} wallets. Next sync in ${SYNC_INTERVAL_MS / 1000}s`);
       } catch (error) {
         console.error('[SERVER] Scheduled sync failed:', error);
       }
     }
   }, SYNC_INTERVAL_MS);
+
+  console.log(`[SERVER] Periodic sync scheduled. Next sync in ${SYNC_INTERVAL_MS / 1000}s`);
 }
 
 // Start server
