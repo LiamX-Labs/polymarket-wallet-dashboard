@@ -82,6 +82,22 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Debug endpoint to check sync status
+app.get('/api/debug', (req, res) => {
+  const trackerDbExists = fs.existsSync(TRACKER_DB_PATH);
+  const dashboardDbExists = fs.existsSync(DASHBOARD_DB_PATH);
+
+  res.json({
+    success: true,
+    trackerDbPath: TRACKER_DB_PATH,
+    trackerDbExists,
+    dashboardDbPath: DASHBOARD_DB_PATH,
+    dashboardDbExists,
+    syncServiceInitialized: syncService !== null,
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Manual sync endpoint
 app.post('/api/sync', (req, res) => {
   if (!syncService) {
@@ -165,12 +181,17 @@ app.listen(PORT, async () => {
   // Wait for tracker database then initialize sync service
   await waitForTrackerDb();
 
-  try {
-    syncService = new SyncService(TRACKER_DB_PATH, DASHBOARD_DB_PATH);
-    await startAutoSync();
-  } catch (error) {
-    console.error('[SERVER] Failed to initialize sync service:', error);
-    console.warn('[SERVER] Server will continue running but sync is disabled');
+  if (fs.existsSync(TRACKER_DB_PATH)) {
+    try {
+      syncService = new SyncService(TRACKER_DB_PATH, DASHBOARD_DB_PATH);
+      await startAutoSync();
+    } catch (error) {
+      console.error('[SERVER] Failed to initialize sync service:', error);
+      console.warn('[SERVER] Server will continue running but sync is disabled');
+    }
+  } else {
+    console.warn('[SERVER] Tracker database not found. Sync is disabled.');
+    console.warn('[SERVER] The tracker needs to run and create the database first.');
   }
 });
 

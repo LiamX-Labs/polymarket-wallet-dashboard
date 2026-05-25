@@ -13,7 +13,9 @@ export function createWalletsRouter(db: DashboardDB): Router {
       const sortBy = (req.query.sort as string) || 'profit_24h';
       const order = (req.query.order as 'asc' | 'desc') || 'desc';
 
+      console.log(`[WALLETS API] Fetching wallets with sort=${sortBy}, order=${order}`);
       const wallets = db.getAllWallets(sortBy, order);
+      console.log(`[WALLETS API] Found ${wallets.length} wallets in dashboard database`);
 
       res.json({
         success: true,
@@ -21,7 +23,7 @@ export function createWalletsRouter(db: DashboardDB): Router {
         data: wallets,
       });
     } catch (error) {
-      console.error('Error fetching wallets:', error);
+      console.error('[WALLETS API] Error fetching wallets:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to fetch wallets',

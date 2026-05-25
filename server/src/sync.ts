@@ -71,14 +71,28 @@ export class SyncService {
         if (stats) {
           this.dashboardDb.upsertWalletStats(stats);
           synced++;
+        } else {
+          console.warn(`[SYNC] No stats returned for wallet ${wallet}`);
         }
       } catch (error) {
         console.error(`[SYNC] Error processing wallet ${wallet}:`, error);
+        if (error instanceof Error) {
+          console.error(`[SYNC] Error details: ${error.message}`);
+          console.error(`[SYNC] Stack trace: ${error.stack}`);
+        }
       }
     }
 
     const duration = Date.now() - startTime;
     console.log(`[SYNC] ${usingLegacyMethod ? 'LEGACY' : 'OPTIMIZED'} sync complete. Synced ${synced}/${wallets.length} wallets in ${duration}ms`);
+
+    // Verify the data was written to the dashboard database
+    try {
+      const verifyCount = this.dashboardDb.getAllWallets().length;
+      console.log(`[SYNC] Verification: Dashboard database now contains ${verifyCount} wallets`);
+    } catch (error) {
+      console.error('[SYNC] Failed to verify dashboard database:', error);
+    }
   }
 
   /**

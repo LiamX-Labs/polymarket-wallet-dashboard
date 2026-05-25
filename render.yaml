@@ -15,7 +15,7 @@ services:
     startCommand: |
       mkdir -p /tmp &&
       python3 market_tracker.py &
-      sleep 10 &&
+      sleep 30 &&
       cd server && npm start
     envVars:
       - key: PORT
