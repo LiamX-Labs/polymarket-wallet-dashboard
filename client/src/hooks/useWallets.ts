@@ -23,19 +23,26 @@ export function useWallets(): UseWalletsResult {
       setLoading(true);
       setError(null);
 
-      const apiUrl = import.meta.env.VITE_API_URL || '';
-      const response = await fetch(
-        `${apiUrl}/api/wallets?sort=${sortBy}&order=${sortOrder}`
-      );
+      // Get API URL from environment, add https:// if needed
+      let apiUrl = import.meta.env.VITE_API_URL || '';
+      if (apiUrl && !apiUrl.startsWith('http')) {
+        apiUrl = `https://${apiUrl}`;
+      }
+
+      const url = `${apiUrl}/api/wallets?sort=${sortBy}&order=${sortOrder}`;
+      console.log('Fetching from:', url);
+
+      const response = await fetch(url);
 
       if (!response.ok) {
-        throw new Error('Failed to fetch wallets');
+        throw new Error(`Failed to fetch wallets: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();
       setWallets(data.data || []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      setError(errorMsg);
       console.error('Error fetching wallets:', err);
     } finally {
       setLoading(false);
