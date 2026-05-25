@@ -11,12 +11,12 @@ services:
     region: oregon
     buildCommand: |
       pip install -r requirements.txt &&
-      cd server && npm install
+      cd server && npm install && npm run build
     startCommand: |
       mkdir -p /tmp &&
       python3 market_tracker.py &
       sleep 10 &&
-      cd server && npm run dev
+      cd server && npm start
     envVars:
       - key: PORT
         value: 10000
