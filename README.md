@@ -291,6 +291,36 @@ pm2 restart polymarket-dashboard-client
 - Verify tracker is polling markets successfully
 - Manually trigger sync: `curl -X POST http://localhost:3001/api/sync`
 
+## Deployment
+
+### Deploy to Render.com (Free)
+
+This project includes a `render.yaml` blueprint for one-click deployment:
+
+1. **Push to GitHub:**
+   ```bash
+   git add .
+   git commit -m "Deploy to Render"
+   git push origin main
+   ```
+
+2. **Deploy to Render:**
+   - Go to [Render Dashboard](https://dashboard.render.com/)
+   - Click **"New"** → **"Blueprint"**
+   - Connect your GitHub repository
+   - Render will auto-create all 3 services (tracker, API, frontend)
+
+3. **Access your dashboard:**
+   - Find your static site URL in Render dashboard
+   - Example: `https://polymarket-dashboard-client.onrender.com`
+
+**Full deployment guide:** See [DEPLOY.md](./DEPLOY.md) for detailed instructions, environment variables, and troubleshooting.
+
+**Other hosting options:**
+- Railway.app (Easy PostgreSQL integration)
+- Fly.io (3 free VMs)
+- Vercel (frontend) + Render (backend + tracker)
+
 ## Future Enhancements
 
 - [ ] Historical performance charts

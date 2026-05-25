@@ -1,0 +1,10 @@
+# Files to ignore during Render deployment
+node_modules/
+.git/
+.gitignore
+*.log
+logs/
+data/*.db
+data/*.sqlite3
+.env.local
+.DS_Store
