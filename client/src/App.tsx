@@ -50,7 +50,7 @@ export default function App() {
       <div className="px-3 pt-3 pb-1 sticky top-[73px] z-10 bg-dark-bg">
         <div className="flex gap-3">
           {/* Today Header */}
-          <div className="flex-shrink-0 bg-red-900/20 px-3 py-1 rounded-t border-t border-x border-dark-border" style={{ width: '340px' }}>
+          <div className="flex-shrink-0 bg-red-900/20 px-3 py-1 rounded-t border-t border-x border-dark-border w-[180px] sm:w-[240px] md:w-[340px]">
             <div className="flex justify-between items-center">
               <div className="text-[10px] text-red-400 font-semibold">
                 Profit 24h / Recent Trade
@@ -86,8 +86,8 @@ export default function App() {
 
           return (
             <div key={wallet.wallet} className="flex gap-3">
-              {/* Today Section (Fixed Width) */}
-              <div className="bg-dark-panel border border-dark-border flex-shrink-0" style={{ width: '340px' }}>
+              {/* Today Section (Responsive Width) */}
+              <div className="bg-dark-panel border border-dark-border flex-shrink-0 w-[180px] sm:w-[240px] md:w-[340px]">
                 <div className="p-2">
                   <WalletCard
                     wallet={wallet}
