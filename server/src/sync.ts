@@ -162,6 +162,7 @@ export class SyncService {
       best_perf_amount: summary.best_trade_amount || 0, // Same as best trade
       best_perf_time_ago: summary.best_trade_time_ago || null,
       worst_perf_amount: summary.worst_trade_amount || 0,
+      worst_perf_time_ago: summary.worst_trade_time_ago || null,
       num_wins: summary.num_wins || 0,
       num_losses: summary.num_losses || 0,
       avg_trade_size: summary.avg_trade_size || 0,
@@ -289,6 +290,7 @@ export class SyncService {
       best_perf_amount: bestTrade.amount, // Same as best trade for now
       best_perf_time_ago: bestTrade.timestamp,
       worst_perf_amount: worstPerf.amount,
+      worst_perf_time_ago: worstPerf.timestamp,
       num_wins: numWins,
       num_losses: numLosses,
       avg_trade_size: avgTradeSize,

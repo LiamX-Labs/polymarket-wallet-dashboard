@@ -279,6 +279,9 @@ class BTCMarketTracker:
                     "avg_loss": metrics["avg_loss"],
                     "best_trade": metrics["best_trade"],
                     "worst_trade": metrics["worst_trade"],
+                    "best_trade_timestamp": metrics["best_trade_timestamp"],
+                    "worst_trade_timestamp": metrics["worst_trade_timestamp"],
+                    "total_positions": metrics["total_positions"],
                 }
                 top_5_performance.append(performance)
             except Exception as e:
@@ -303,6 +306,9 @@ class BTCMarketTracker:
                     "avg_loss": 0.0,
                     "best_trade": 0.0,
                     "worst_trade": 0.0,
+                    "best_trade_timestamp": None,
+                    "worst_trade_timestamp": None,
+                    "total_positions": 0,
                 })
 
         logger.info(f"Calculated performance metrics for {len(top_5_performance)} wallets")
@@ -367,6 +373,13 @@ class BTCMarketTracker:
             profit_24h = sum(p["value"] for p in positions if p["trigger_ts"] >= (trigger_ts - 86400))
             avg_time_between = self._calculate_avg_time_between([dict(p) for p in positions])
 
+            # Calculate win rate from closed positions
+            total_closed = perf["total_positions"]
+            win_rate_from_closed = (perf["num_wins"] / total_closed * 100) if total_closed > 0 else 0
+
+            # Calculate avg trades per day from closed positions
+            avg_trades_per_day_from_closed = total_closed / 7 if total_closed > 0 else 0
+
             dashboard_data = {
                 "wallet": perf["wallet"],
                 "scan_event_id": scan_event_id,
@@ -380,10 +393,10 @@ class BTCMarketTracker:
                 "avg_time_between_positions": avg_time_between,
                 "last_position_timestamp": recent_position["trigger_ts"] if recent_position else None,
 
-                # Track record
-                "win_rate": wallet_stats["win_rate"] if wallet_stats else 0,
-                "total_trades": wallet_stats["trade_count"] if wallet_stats else 0,
-                "avg_trades_per_day": wallet_stats["trade_count"] / 7 if wallet_stats else 0,
+                # Track record - ALL from closed positions
+                "win_rate": win_rate_from_closed,
+                "total_trades": total_closed,
+                "avg_trades_per_day": avg_trades_per_day_from_closed,
                 "avg_hold_time_seconds": avg_hold_time,
                 "avg_trade_size": wallet_stats["avg_trade_size"] if wallet_stats else 0,
 
@@ -396,8 +409,9 @@ class BTCMarketTracker:
                 "avg_win": perf["avg_win"],
                 "avg_loss": perf["avg_loss"],
                 "best_trade_amount": perf["best_trade"],
-                "best_trade_time_ago": recent_position["trigger_ts"] if recent_position else None,
+                "best_trade_time_ago": perf["best_trade_timestamp"],
                 "worst_trade_amount": perf["worst_trade"],
+                "worst_trade_time_ago": perf["worst_trade_timestamp"],
             }
 
             self.db.upsert_wallet_dashboard_summary(dashboard_data)

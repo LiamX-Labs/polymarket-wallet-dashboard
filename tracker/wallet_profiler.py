@@ -150,6 +150,9 @@ class WalletProfiler:
                 - avg_loss: average loss per losing position
                 - best_trade: largest single winning position
                 - worst_trade: largest single losing position
+                - best_trade_timestamp: timestamp of best trade
+                - worst_trade_timestamp: timestamp of worst trade
+                - total_positions: total count of closed positions
         """
         if not positions:
             return {
@@ -162,15 +165,19 @@ class WalletProfiler:
                 "avg_loss": 0.0,
                 "best_trade": 0.0,
                 "worst_trade": 0.0,
+                "best_trade_timestamp": None,
+                "worst_trade_timestamp": None,
+                "total_positions": 0,
             }
 
-        pnl_values = [float(p.get("realizedPnl", 0) or 0) for p in positions]
+        # Create list of (pnl, timestamp) tuples
+        pnl_data = [(float(p.get("realizedPnl", 0) or 0), int(p.get("timestamp", 0) or 0)) for p in positions]
 
-        winning_positions = [pnl for pnl in pnl_values if pnl > 0]
-        losing_positions = [pnl for pnl in pnl_values if pnl < 0]
+        winning_positions = [(pnl, ts) for pnl, ts in pnl_data if pnl > 0]
+        losing_positions = [(pnl, ts) for pnl, ts in pnl_data if pnl < 0]
 
-        total_profits = sum(winning_positions) if winning_positions else 0.0
-        total_losses = abs(sum(losing_positions)) if losing_positions else 0.0
+        total_profits = sum(pnl for pnl, _ in winning_positions) if winning_positions else 0.0
+        total_losses = abs(sum(pnl for pnl, _ in losing_positions)) if losing_positions else 0.0
 
         profit_factor = (total_profits / total_losses) if total_losses > 0 else 0.0
 
@@ -180,8 +187,9 @@ class WalletProfiler:
         avg_win = (total_profits / num_wins) if num_wins > 0 else 0.0
         avg_loss = (total_losses / num_losses) if num_losses > 0 else 0.0
 
-        best_trade = max(winning_positions) if winning_positions else 0.0
-        worst_trade = min(losing_positions) if losing_positions else 0.0
+        # Find best and worst trades with their timestamps
+        best_trade_data = max(winning_positions, key=lambda x: x[0]) if winning_positions else (0.0, None)
+        worst_trade_data = min(losing_positions, key=lambda x: x[0]) if losing_positions else (0.0, None)
 
         return {
             "total_profits": total_profits,
@@ -191,8 +199,11 @@ class WalletProfiler:
             "num_losses": num_losses,
             "avg_win": avg_win,
             "avg_loss": avg_loss,
-            "best_trade": best_trade,
-            "worst_trade": worst_trade,
+            "best_trade": best_trade_data[0],
+            "worst_trade": worst_trade_data[0],
+            "best_trade_timestamp": best_trade_data[1],
+            "worst_trade_timestamp": worst_trade_data[1],
+            "total_positions": len(positions),
         }
 
     def calculate_avg_time_between_closed_positions(self, positions: list[dict]) -> int:

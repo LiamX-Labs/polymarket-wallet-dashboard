@@ -37,6 +37,7 @@ export class DashboardDB {
         best_perf_amount REAL DEFAULT 0,
         best_perf_time_ago INTEGER,
         worst_perf_amount REAL DEFAULT 0,
+        worst_perf_time_ago INTEGER,
         num_wins INTEGER DEFAULT 0,
         num_losses INTEGER DEFAULT 0,
         avg_trade_size REAL DEFAULT 0,
@@ -60,11 +61,11 @@ export class DashboardDB {
         last_position_timestamp, win_rate, total_trades, avg_trades_per_day,
         avg_hold_time_seconds, avg_win, avg_loss, best_trade_amount,
         best_trade_time_ago, best_perf_amount, best_perf_time_ago,
-        worst_perf_amount, num_wins, num_losses, avg_trade_size,
+        worst_perf_amount, worst_perf_time_ago, num_wins, num_losses, avg_trade_size,
         profit_factor, last_updated
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
       ON CONFLICT(wallet) DO UPDATE SET
         profit_24h = excluded.profit_24h,
@@ -85,6 +86,7 @@ export class DashboardDB {
         best_perf_amount = excluded.best_perf_amount,
         best_perf_time_ago = excluded.best_perf_time_ago,
         worst_perf_amount = excluded.worst_perf_amount,
+        worst_perf_time_ago = excluded.worst_perf_time_ago,
         num_wins = excluded.num_wins,
         num_losses = excluded.num_losses,
         avg_trade_size = excluded.avg_trade_size,
@@ -112,6 +114,7 @@ export class DashboardDB {
       stats.best_perf_amount,
       stats.best_perf_time_ago,
       stats.worst_perf_amount,
+      stats.worst_perf_time_ago,
       stats.num_wins,
       stats.num_losses,
       stats.avg_trade_size,

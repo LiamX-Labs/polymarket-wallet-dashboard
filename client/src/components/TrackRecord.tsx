@@ -70,12 +70,12 @@ export function TrackRecord({ wallet }: TrackRecordProps) {
         <div className="text-gray-400 text-[11px] text-center">{formatTimeAgo(wallet.best_trade_time_ago)}</div>
       </div>
 
-      {/* Best Perf $ / time ago */}
+      {/* Worst Perf $ / time ago */}
       <div className="flex flex-col w-[70px]">
         <div className="font-semibold text-accent-red text-center">
           {formatCurrency(wallet.worst_perf_amount)}
         </div>
-        <div className="text-gray-400 text-[11px] text-center">{formatTimeAgo(wallet.best_perf_time_ago)}</div>
+        <div className="text-gray-400 text-[11px] text-center">{formatTimeAgo(wallet.worst_perf_time_ago)}</div>
       </div>
 
       {/* Best Perf $ / # wins */}
