@@ -153,6 +153,7 @@ class WalletProfiler:
                 - best_trade_timestamp: timestamp of best trade
                 - worst_trade_timestamp: timestamp of worst trade
                 - total_positions: total count of closed positions
+                - avg_return_per_trade: average ROI per trade (percentage)
         """
         if not positions:
             return {
@@ -168,10 +169,23 @@ class WalletProfiler:
                 "best_trade_timestamp": None,
                 "worst_trade_timestamp": None,
                 "total_positions": 0,
+                "avg_return_per_trade": 0.0,
             }
 
         # Create list of (pnl, timestamp) tuples
         pnl_data = [(float(p.get("realizedPnl", 0) or 0), int(p.get("timestamp", 0) or 0)) for p in positions]
+
+        # Calculate individual returns for average return per trade
+        individual_returns = []
+        for p in positions:
+            pnl = float(p.get("realizedPnl", 0) or 0)
+            avg_price = float(p.get("avgPrice", 0) or 0)
+            total_bought = float(p.get("totalBought", 0) or 0)
+            capital = avg_price * total_bought
+            if capital > 0:
+                individual_returns.append(pnl / capital)
+
+        avg_return_per_trade = (sum(individual_returns) / len(individual_returns) * 100.0) if individual_returns else 0.0
 
         winning_positions = [(pnl, ts) for pnl, ts in pnl_data if pnl > 0]
         losing_positions = [(pnl, ts) for pnl, ts in pnl_data if pnl < 0]
@@ -204,6 +218,7 @@ class WalletProfiler:
             "best_trade_timestamp": best_trade_data[1],
             "worst_trade_timestamp": worst_trade_data[1],
             "total_positions": len(positions),
+            "avg_return_per_trade": avg_return_per_trade,
         }
 
     def calculate_avg_time_between_closed_positions(self, positions: list[dict]) -> int:
@@ -327,19 +342,22 @@ class WalletProfiler:
         total_pnl = sum(pnl_values)
         total_size = sum(sizes) or 1.0
         total_capital = sum(p["capital"] for p in position_data) or 1.0
-        wins = [p for p in pnl_values if p > 0]
 
         # ROI based on actual wallet bankroll (net deposits from PolygonScan)
-        # Falls back to estimated bankroll if real balance unavailable
-        # This gives true return on investment based on actual capital deployed
+        # This is Portfolio ROI
         roi = (total_pnl / bankroll) * 100.0 if bankroll > 0 else 0.0
-        win_rate = (len(wins) / len(pnl_values)) * 100.0
+        
+        # Get detailed PnL metrics for win rate and average return per trade
+        pnl_metrics = self.calculate_pnl_metrics(positions)
+        win_rate = pnl_metrics.get("win_rate", 0.0)
+        avg_return_per_trade = pnl_metrics.get("avg_return_per_trade", 0.0)
 
         return {
             "wallet": wallet,
             "roi": roi,
             "win_rate": win_rate,
             "pnl": total_pnl,
+            "avg_return_per_trade": avg_return_per_trade,
             "trade_count": len(pnl_values),
             "fill_count": fill_count,
             "avg_trade_size": total_size / len(sizes),

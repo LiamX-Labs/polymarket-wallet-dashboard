@@ -237,11 +237,11 @@ class WalletFilterPipeline:
                 continue
             pnl_metrics = self.profiler.calculate_pnl_metrics(positions)
             win_rate = pnl_metrics.get("win_rate", 0.0)
-            total_pnl = pnl_metrics.get("total_profits", 0.0)
-            num_trades = pnl_metrics.get("total_positions", 0)
+            avg_return_per_trade = pnl_metrics.get("avg_return_per_trade", 0.0)
             
-            # Calculate average return per trade
-            avg_return_per_trade = (total_pnl / num_trades * 100.0) if num_trades > 0 else 0.0
+            # Use net PnL (profits - losses) for reporting
+            total_pnl = pnl_metrics.get("total_profits", 0.0) - pnl_metrics.get("total_losses", 0.0)
+            num_trades = pnl_metrics.get("total_positions", 0)
             
             if win_rate > self.min_win_rate and avg_return_per_trade > self.min_avg_return:
                 qualified.append({
@@ -250,6 +250,6 @@ class WalletFilterPipeline:
                     "avg_return_per_trade": avg_return_per_trade,
                     "total_pnl": total_pnl,
                     "num_trades": num_trades,
-                    "roi": (total_pnl / num_trades * 100.0) if num_trades > 0 else 0.0,
+                    "roi": avg_return_per_trade,
                 })
         return qualified
