@@ -191,7 +191,10 @@ class BTCMarketTracker:
 
         # Step 2: Run the 4-stage filter pipeline
         # This filters by: profit > $1, hold_time >= 10min, trade_count >= 20, performance criteria
-        top_wallets = self.filter_pipeline.run_pipeline(candidate_wallets, market_title=market.title)
+        # Use asyncio.to_thread for the blocking pipeline call
+        top_wallets, wallet_data_cache = await asyncio.to_thread(
+            self.filter_pipeline.run_pipeline, candidate_wallets, market.title
+        )
 
         # Early exit if no wallets qualify
         if not top_wallets:
@@ -212,7 +215,7 @@ class BTCMarketTracker:
         )
 
         # Step 4: Enrich top 5 with current market position data
-        wallet_closed_positions = {}  # Cache for hold time calculations
+        wallet_closed_positions = {}  # Cache for metrics calculations
         enriched_picks = []
 
         for wallet_data in top_5:
@@ -222,8 +225,14 @@ class BTCMarketTracker:
             pos = next((p for p in all_positions if p.wallet == wallet), None)
 
             try:
-                # Fetch closed positions for hold time calculation
-                positions = self.profiler.get_all_positions_7d(wallet)
+                # Reuse positions from pipeline cache if available, else fallback to fetch
+                # Note: pipeline uses 4d lookback, which is sufficient for recent performance
+                if wallet in wallet_data_cache:
+                    positions = wallet_data_cache[wallet]
+                else:
+                    logger.debug("Cache miss for %s, fetching 7d data", wallet[:8])
+                    positions = self.profiler.get_all_positions_7d(wallet)
+                
                 wallet_closed_positions[wallet] = positions
 
                 enriched_picks.append({

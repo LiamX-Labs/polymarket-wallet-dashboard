@@ -10,8 +10,8 @@ Implements 4-stage filtering:
 
 import logging
 from datetime import datetime, timedelta
-from typing import Iterable, List, Dict, Tuple
-import signal
+from typing import Iterable, List, Dict, Tuple, Optional
+import concurrent.futures
 
 if __package__ in {None, ""}:
     from polymarket_api_fetcher import PolymarketAPIFetcher
@@ -33,6 +33,7 @@ class WalletFilterPipeline:
     DEFAULT_MIN_TRADE_COUNT = 20
     DEFAULT_MIN_WIN_RATE = 40.0
     DEFAULT_MIN_AVG_RETURN = 60.0
+    MAX_WORKERS = 10  # Parallel fetches
 
     def __init__(
         self,
@@ -53,7 +54,7 @@ class WalletFilterPipeline:
         self.min_win_rate = min_win_rate
         self.min_avg_return = min_avg_return
 
-    def run_pipeline(self, candidate_wallets: Iterable[str], market_title: str = None) -> List[Dict]:
+    def run_pipeline(self, candidate_wallets: Iterable[str], market_title: str = None) -> Tuple[List[Dict], Dict[str, List[Dict]]]:
         """
         Run the complete 4-stage filter pipeline on candidate wallets.
 
@@ -62,15 +63,14 @@ class WalletFilterPipeline:
             market_title: Optional market title for logging
 
         Returns:
-            List of qualifying wallets with their metrics, sorted by ROI (descending)
+            Tuple of (qualified_wallets_list, wallet_data_cache_dict)
         """
         context = {
             "market": market_title or "BTC Markets",
-            "initial_count": len(list(candidate_wallets)),
         }
         
-        # Convert to list if needed
-        wallets = list(set(candidate_wallets))  # Remove duplicates
+        # Convert to list and remove duplicates
+        wallets = list(set(candidate_wallets))
         context["initial_count"] = len(wallets)
         
         logger.info(
@@ -80,8 +80,17 @@ class WalletFilterPipeline:
             self.lookback_days,
         )
 
+        if not wallets:
+            return [], {}
+
+        # Step 0: Fetch data for all wallets in parallel
+        cutoff_timestamp = int(
+            (datetime.utcnow() - timedelta(days=self.lookback_days)).timestamp()
+        )
+        wallet_data = self._fetch_all_wallets_parallel(wallets, cutoff_timestamp)
+
         # Stage 1: Minimum Profit Filter
-        stage1_wallets = self._filter_by_minimum_profit(wallets)
+        stage1_wallets = self._filter_by_minimum_profit(wallets, wallet_data)
         logger.info(
             "Pipeline Stage 1: Profit Filter | threshold=$%.2f "
             "passed=%s filtered_out=%s",
@@ -93,10 +102,10 @@ class WalletFilterPipeline:
         # Early exit if no wallets pass stage 1
         if not stage1_wallets:
             logger.warning("Pipeline STOPPED at Stage 1: No wallets with profit > $%.2f", self.min_profit)
-            return []
+            return [], wallet_data
 
         # Stage 2: Hold Time Filter (Anti-Bot/Scalper)
-        stage2_wallets = self._filter_by_hold_time(stage1_wallets)
+        stage2_wallets = self._filter_by_hold_time(stage1_wallets, wallet_data)
         logger.info(
             "Pipeline Stage 2: Hold Time Filter | threshold=%d min "
             "passed=%s filtered_out=%s",
@@ -111,10 +120,10 @@ class WalletFilterPipeline:
                 "Pipeline STOPPED at Stage 2: No wallets with avg hold time >= %d minutes",
                 self.min_hold_time_minutes,
             )
-            return []
+            return [], wallet_data
 
         # Stage 3: Trade Volume Filter (Statistical Significance)
-        stage3_wallets = self._filter_by_trade_count(stage2_wallets)
+        stage3_wallets = self._filter_by_trade_count(stage2_wallets, wallet_data)
         logger.info(
             "Pipeline Stage 3: Trade Volume Filter | threshold=%d trades "
             "passed=%s filtered_out=%s",
@@ -129,10 +138,10 @@ class WalletFilterPipeline:
                 "Pipeline STOPPED at Stage 3: No wallets with >= %d closed trades",
                 self.min_trade_count,
             )
-            return []
+            return [], wallet_data
 
         # Stage 4: Performance Alpha Filter
-        qualified_wallets = self._filter_by_performance_alpha(stage3_wallets)
+        qualified_wallets = self._filter_by_performance_alpha(stage3_wallets, wallet_data)
         logger.info(
             "Pipeline Stage 4: Performance Alpha Filter | win_rate>%.0f%% avg_return>%.0f%% "
             "passed=%s filtered_out=%s",
@@ -156,162 +165,91 @@ class WalletFilterPipeline:
             len(qualified_wallets),
         )
 
-        return qualified_wallets
+        return qualified_wallets, wallet_data
 
-    def _filter_by_minimum_profit(self, wallets: List[str]) -> List[str]:
-        """
-        Filter 1: Keep wallets with total profit > min_profit threshold.
+    def _fetch_all_wallets_parallel(self, wallets: List[str], cutoff_timestamp: int) -> Dict[str, List[Dict]]:
+        """Fetch all wallet data in parallel."""
+        wallet_to_positions = {}
+        
+        logger.info("Fetching data for %d wallets in parallel (max_workers=%d)...", len(wallets), self.MAX_WORKERS)
+        start_time = datetime.utcnow()
 
-        Returns:
-            List of wallet addresses that passed the filter
-        """
-        cutoff_timestamp = int(
-            (datetime.utcnow() - timedelta(days=self.lookback_days)).timestamp()
-        )
-        passed = []
-        skipped = 0
-        max_time_per_wallet = 5.0  # Max 5 seconds per wallet to fetch positions
-
-        for i, wallet in enumerate(wallets):
-            start_time = datetime.utcnow()
+        def fetch_one(wallet: str) -> Tuple[str, List[Dict]]:
             try:
-                logger.debug("Stage 1: Fetching positions for wallet %d/%d (%s...)", i+1, len(wallets), wallet[:8])
                 positions = self.fetcher.get_all_closed_positions(
                     wallet, cutoff_timestamp=cutoff_timestamp
                 )
-                elapsed = (datetime.utcnow() - start_time).total_seconds()
-                
-                if not positions:
-                    logger.debug("Stage 1: Wallet %s returned 0 positions (%.2fs)", wallet[:8], elapsed)
-                    continue
-
-                total_pnl = sum(float(p.get("realizedPnl", 0) or 0) for p in positions)
-                elapsed = (datetime.utcnow() - start_time).total_seconds()
-                
-                logger.debug("Stage 1: Wallet %s has $%.2f PnL from %d positions (%.2fs)", 
-                           wallet[:8], total_pnl, len(positions), elapsed)
-
-                if total_pnl > self.min_profit:
-                    passed.append(wallet)
+                return wallet, positions
             except Exception as e:
-                elapsed = (datetime.utcnow() - start_time).total_seconds()
-                logger.debug("Stage 1: Error fetching positions for wallet %s after %.2fs: %s", 
-                           wallet[:8], elapsed, str(e))
-                skipped += 1
+                logger.debug("Error fetching wallet %s: %s", wallet[:8], e)
+                return wallet, []
 
-        if skipped > 0:
-            logger.debug("Stage 1: Skipped %d wallets due to errors", skipped)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as executor:
+            future_to_wallet = {executor.submit(fetch_one, w): w for w in wallets}
+            for future in concurrent.futures.as_completed(future_to_wallet):
+                wallet, positions = future.result()
+                wallet_to_positions[wallet] = positions
 
-        return passed
+        elapsed = (datetime.utcnow() - start_time).total_seconds()
+        logger.info("Parallel fetch complete | total_wallets=%d elapsed=%.2fs", len(wallets), elapsed)
+        return wallet_to_positions
 
-    def _filter_by_hold_time(self, wallets: List[str]) -> List[str]:
-        """
-        Filter 2: Keep wallets with average hold time >= min_hold_time_minutes.
-
-        Hold time = (position close timestamp - position close timestamp of previous) / position count
-        This filters out HFT/scalper bots that flip positions too quickly.
-
-        Returns:
-            List of wallet addresses that passed the filter
-        """
-        cutoff_timestamp = int(
-            (datetime.utcnow() - timedelta(days=self.lookback_days)).timestamp()
-        )
+    def _filter_by_minimum_profit(self, wallets: List[str], wallet_data: Dict[str, List[Dict]]) -> List[str]:
+        """Filter 1: Keep wallets with total profit > min_profit threshold."""
         passed = []
-
         for wallet in wallets:
-            try:
-                positions = self.fetcher.get_all_closed_positions(
-                    wallet, cutoff_timestamp=cutoff_timestamp
-                )
-                if len(positions) < 2:  # Need at least 2 positions to measure hold time
-                    continue
-
-                avg_hold_time_seconds = self.profiler.calculate_avg_time_between_closed_positions(
-                    positions
-                )
-                avg_hold_time_minutes = avg_hold_time_seconds / 60.0
-
-                if avg_hold_time_minutes >= self.min_hold_time_minutes:
-                    passed.append(wallet)
-            except Exception as e:
-                logger.debug("Error checking hold time for wallet %s: %s", wallet[:10], str(e))
-
+            positions = wallet_data.get(wallet, [])
+            if not positions:
+                continue
+            total_pnl = sum(float(p.get("realizedPnl", 0) or 0) for p in positions)
+            if total_pnl > self.min_profit:
+                passed.append(wallet)
         return passed
 
-    def _filter_by_trade_count(self, wallets: List[str]) -> List[str]:
-        """
-        Filter 3: Keep wallets with total closed trades >= min_trade_count.
-
-        This ensures statistical significance and filters out lucky one-off trades.
-
-        Returns:
-            List of wallet addresses that passed the filter
-        """
-        cutoff_timestamp = int(
-            (datetime.utcnow() - timedelta(days=self.lookback_days)).timestamp()
-        )
+    def _filter_by_hold_time(self, wallets: List[str], wallet_data: Dict[str, List[Dict]]) -> List[str]:
+        """Filter 2: Keep wallets with average hold time >= min_hold_time_minutes."""
         passed = []
-
         for wallet in wallets:
-            try:
-                positions = self.fetcher.get_all_closed_positions(
-                    wallet, cutoff_timestamp=cutoff_timestamp
-                )
-                if len(positions) >= self.min_trade_count:
-                    passed.append(wallet)
-            except Exception as e:
-                logger.debug("Error counting trades for wallet %s: %s", wallet[:10], str(e))
-
+            positions = wallet_data.get(wallet, [])
+            if len(positions) < 2:
+                continue
+            avg_hold_time_seconds = self.profiler.calculate_avg_time_between_closed_positions(positions)
+            avg_hold_time_minutes = avg_hold_time_seconds / 60.0
+            if avg_hold_time_minutes >= self.min_hold_time_minutes:
+                passed.append(wallet)
         return passed
 
-    def _filter_by_performance_alpha(self, wallets: List[str]) -> List[Dict]:
-        """
-        Filter 4: Keep wallets meeting BOTH criteria:
-        - Win rate > min_win_rate (default 70%)
-        - Average return per trade > min_avg_return (default 100%)
+    def _filter_by_trade_count(self, wallets: List[str], wallet_data: Dict[str, List[Dict]]) -> List[str]:
+        """Filter 3: Keep wallets with total closed trades >= min_trade_count."""
+        passed = []
+        for wallet in wallets:
+            positions = wallet_data.get(wallet, [])
+            if len(positions) >= self.min_trade_count:
+                passed.append(wallet)
+        return passed
 
-        Returns:
-            List of dicts with wallet address and performance metrics
-        """
-        cutoff_timestamp = int(
-            (datetime.utcnow() - timedelta(days=self.lookback_days)).timestamp()
-        )
+    def _filter_by_performance_alpha(self, wallets: List[str], wallet_data: Dict[str, List[Dict]]) -> List[Dict]:
+        """Filter 4: Win rate > min_win_rate AND average return per trade > min_avg_return."""
         qualified = []
-
         for wallet in wallets:
-            try:
-                positions = self.fetcher.get_all_closed_positions(
-                    wallet, cutoff_timestamp=cutoff_timestamp
-                )
-                if not positions:
-                    continue
-
-                # Calculate performance metrics
-                pnl_metrics = self.profiler.calculate_pnl_metrics(positions)
-                win_rate = pnl_metrics.get("win_rate", 0.0)  # Already in percentage
-                total_pnl = pnl_metrics.get("total_profits", 0.0)
-                num_trades = pnl_metrics.get("total_positions", 0)
-
-                # Calculate average return per trade
-                if num_trades > 0:
-                    avg_return_per_trade = (total_pnl / num_trades) * 100.0  # Convert to percentage
-                else:
-                    avg_return_per_trade = 0.0
-
-                # Check both criteria
-                if win_rate > self.min_win_rate and avg_return_per_trade > self.min_avg_return:
-                    qualified.append(
-                        {
-                            "wallet": wallet,
-                            "win_rate": win_rate,
-                            "avg_return_per_trade": avg_return_per_trade,
-                            "total_pnl": total_pnl,
-                            "num_trades": num_trades,
-                            "roi": (total_pnl / num_trades) * 100.0 if num_trades > 0 else 0.0,
-                        }
-                    )
-            except Exception as e:
-                logger.debug("Error calculating performance for wallet %s: %s", wallet[:10], str(e))
-
+            positions = wallet_data.get(wallet, [])
+            if not positions:
+                continue
+            pnl_metrics = self.profiler.calculate_pnl_metrics(positions)
+            win_rate = pnl_metrics.get("win_rate", 0.0)
+            total_pnl = pnl_metrics.get("total_profits", 0.0)
+            num_trades = pnl_metrics.get("total_positions", 0)
+            
+            # Calculate average return per trade
+            avg_return_per_trade = (total_pnl / num_trades * 100.0) if num_trades > 0 else 0.0
+            
+            if win_rate > self.min_win_rate and avg_return_per_trade > self.min_avg_return:
+                qualified.append({
+                    "wallet": wallet,
+                    "win_rate": win_rate,
+                    "avg_return_per_trade": avg_return_per_trade,
+                    "total_pnl": total_pnl,
+                    "num_trades": num_trades,
+                    "roi": (total_pnl / num_trades * 100.0) if num_trades > 0 else 0.0,
+                })
         return qualified

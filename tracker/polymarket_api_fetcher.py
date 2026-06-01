@@ -18,7 +18,7 @@ class PolymarketAPIFetcher:
     """Fetches trading data from Polymarket's official API"""
 
     BASE_URL = "https://data-api.polymarket.com"
-    REQUEST_DELAY_SECONDS = 0.5  # Delay between requests to avoid rate limiting
+    REQUEST_DELAY_SECONDS = 0.3  # Delay between requests to avoid rate limiting
     MAX_RETRIES = 3  # Maximum retry attempts for 408/429 errors
     RETRY_DELAY_BASE = 1.0  # Base delay for exponential backoff
 
