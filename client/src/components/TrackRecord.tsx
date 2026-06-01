@@ -70,23 +70,23 @@ export function TrackRecord({ wallet }: TrackRecordProps) {
         <div className="text-gray-400 text-[11px] text-center">{formatTimeAgo(wallet.best_trade_time_ago)}</div>
       </div>
 
-      {/* Worst Perf $ / time ago */}
-      <div className="flex flex-col w-[70px]">
-        <div className="font-semibold text-accent-red text-center">
-          {formatCurrency(wallet.worst_perf_amount)}
-        </div>
-        <div className="text-gray-400 text-[11px] text-center">{formatTimeAgo(wallet.worst_perf_time_ago)}</div>
-      </div>
-
-      {/* Best Perf $ / # wins */}
+      {/* Best Perf $ / time ago */}
       <div className="flex flex-col w-[70px]">
         <div className="font-semibold text-accent-green text-center">
           {formatCurrency(wallet.best_perf_amount)}
         </div>
+        <div className="text-gray-400 text-[11px] text-center">{formatTimeAgo(wallet.best_perf_time_ago)}</div>
+      </div>
+
+      {/* Worst Perf $ / # wins */}
+      <div className="flex flex-col w-[70px]">
+        <div className="font-semibold text-accent-red text-center">
+          {formatCurrency(wallet.worst_perf_amount)}
+        </div>
         <div className="text-gray-400 text-[11px] text-center">{wallet.num_wins} wins</div>
       </div>
 
-      {/* Worst perf / # losses */}
+      {/* Worst Perf $ / # losses */}
       <div className="flex flex-col w-[70px]">
         <div className="font-semibold text-accent-red text-center">
           {formatCurrency(wallet.worst_perf_amount)}

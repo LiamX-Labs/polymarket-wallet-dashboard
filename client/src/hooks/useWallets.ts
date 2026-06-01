@@ -9,6 +9,8 @@ interface UseWalletsResult {
   sortBy: SortField;
   sortOrder: SortOrder;
   setSorting: (field: SortField, order: SortOrder) => void;
+  avgTradeSize: { operator: string; value: number } | null;
+  setAvgTradeSizeFilter: (filter: { operator: string; value: number } | null) => void;
 }
 
 export function useWallets(): UseWalletsResult {
@@ -17,19 +19,24 @@ export function useWallets(): UseWalletsResult {
   const [error, setError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortField>('last_updated');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+  const [avgTradeSize, setAvgTradeSize] = useState<{ operator: string; value: number } | null>(null);
 
   const fetchWallets = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Get API URL from environment, add https:// if needed
       let apiUrl = import.meta.env.VITE_API_URL || '';
       if (apiUrl && !apiUrl.startsWith('http')) {
         apiUrl = `https://${apiUrl}`;
       }
 
-      const url = `${apiUrl}/api/wallets?sort=${sortBy}&order=${sortOrder}`;
+      let url = `${apiUrl}/api/wallets?sort=${sortBy}&order=${sortOrder}`;
+      
+      if (avgTradeSize) {
+        url += `&avgTradeSizeOp=${avgTradeSize.operator}&avgTradeSize=${avgTradeSize.value}`;
+      }
+
       console.log('[useWallets] Environment:', {
         VITE_API_URL: import.meta.env.VITE_API_URL,
         apiUrl,
@@ -51,7 +58,7 @@ export function useWallets(): UseWalletsResult {
     } finally {
       setLoading(false);
     }
-  }, [sortBy, sortOrder]);
+  }, [sortBy, sortOrder, avgTradeSize]);
 
   useEffect(() => {
     fetchWallets();
@@ -71,6 +78,10 @@ export function useWallets(): UseWalletsResult {
     setSortOrder(order);
   }, []);
 
+  const setAvgTradeSizeFilter = useCallback((filter: { operator: string; value: number } | null) => {
+    setAvgTradeSize(filter);
+  }, []);
+
   return {
     wallets,
     loading,
@@ -79,5 +90,7 @@ export function useWallets(): UseWalletsResult {
     sortBy,
     sortOrder,
     setSorting,
+    avgTradeSize,
+    setAvgTradeSizeFilter,
   };
 }

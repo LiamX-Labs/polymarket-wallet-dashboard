@@ -15,7 +15,7 @@ function getBadgeProps(index: number): { color: string; text: string } {
 }
 
 export default function App() {
-  const { wallets, loading, error, sortBy, sortOrder, setSorting } = useWallets();
+  const { wallets, loading, error, sortBy, sortOrder, setSorting, avgTradeSize, setAvgTradeSizeFilter } = useWallets();
 
   if (loading && wallets.length === 0) {
     return (
@@ -44,7 +44,7 @@ export default function App() {
       </header>
 
       {/* Sort/Filter Controls */}
-      <SortFilter sortBy={sortBy} sortOrder={sortOrder} onSort={setSorting} />
+      <SortFilter sortBy={sortBy} sortOrder={sortOrder} onSort={setSorting} avgTradeSize={avgTradeSize} onAvgTradeSizeFilter={setAvgTradeSizeFilter} />
 
       {/* Main Content Layout - Two Column Structure */}
       <div className="px-3 pt-3 pb-3 flex gap-3">
@@ -93,8 +93,8 @@ export default function App() {
                 <div className="w-[60px] text-center">Avg $ loss</div>
                 <div className="w-[70px] text-center">Best Trade $/ time ago</div>
                 <div className="w-[70px] text-center">Best Perf $/ time ago</div>
-                <div className="w-[70px] text-center">Worst perf/ # wins</div>
-                <div className="w-[70px] text-center">Worst perf/ # losses</div>
+                <div className="w-[70px] text-center">Worst perf $/ # wins</div>
+                <div className="w-[70px] text-center">Worst perf $/ # losses</div>
                 <div className="w-[60px] text-center">Avg $ trade size</div>
                 <div className="w-[50px] text-center">Profit Factor</div>
               </div>

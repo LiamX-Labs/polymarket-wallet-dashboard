@@ -6,15 +6,38 @@ export function createWalletsRouter(db: DashboardDB): Router {
 
   /**
    * GET /api/wallets
-   * Get all wallets with optional sorting
+   * Get all wallets with optional sorting and filtering
    */
   router.get('/', (req: Request, res: Response) => {
     try {
       const sortBy = (req.query.sort as string) || 'profit_24h';
       const order = (req.query.order as 'asc' | 'desc') || 'desc';
+      const avgTradeSizeOp = (req.query.avgTradeSizeOp as string) || null;
+      const avgTradeSize = req.query.avgTradeSize ? parseFloat(req.query.avgTradeSize as string) : null;
 
-      console.log(`[WALLETS API] Fetching wallets with sort=${sortBy}, order=${order}`);
-      const wallets = db.getAllWallets(sortBy, order);
+      console.log(`[WALLETS API] Fetching wallets with sort=${sortBy}, order=${order}, avgTradeSizeFilter=${avgTradeSizeOp}${avgTradeSize ? ` ${avgTradeSize}` : ''}`);
+      let wallets = db.getAllWallets(sortBy, order);
+      
+      // Apply average trade size filter if provided
+      if (avgTradeSizeOp && avgTradeSize !== null) {
+        wallets = wallets.filter(wallet => {
+          switch (avgTradeSizeOp) {
+            case '<=':
+              return wallet.avg_trade_size <= avgTradeSize;
+            case '>=':
+              return wallet.avg_trade_size >= avgTradeSize;
+            case '<':
+              return wallet.avg_trade_size < avgTradeSize;
+            case '>':
+              return wallet.avg_trade_size > avgTradeSize;
+            case '=':
+              return wallet.avg_trade_size === avgTradeSize;
+            default:
+              return true;
+          }
+        });
+      }
+
       console.log(`[WALLETS API] Found ${wallets.length} wallets in dashboard database`);
 
       res.json({
