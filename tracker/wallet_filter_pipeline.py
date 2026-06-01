@@ -28,10 +28,10 @@ class WalletFilterPipeline:
     # Filter thresholds (configurable via init)
     DEFAULT_LOOKBACK_DAYS = 4
     DEFAULT_MIN_PROFIT = 1.0
-    DEFAULT_MIN_HOLD_TIME_MINUTES = 10
+    DEFAULT_MIN_HOLD_TIME_MINUTES = 5
     DEFAULT_MIN_TRADE_COUNT = 20
     DEFAULT_MIN_WIN_RATE = 40.0
-    DEFAULT_MIN_AVG_RETURN = 100.0
+    DEFAULT_MIN_AVG_RETURN = 50.0
 
     def __init__(
         self,
