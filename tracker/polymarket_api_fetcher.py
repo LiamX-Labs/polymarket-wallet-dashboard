@@ -10,6 +10,7 @@ Note: The trades endpoint has a maximum offset of 3000, limiting historical
 import requests
 import sys
 import csv
+import time
 from datetime import datetime
 
 
@@ -17,6 +18,9 @@ class PolymarketAPIFetcher:
     """Fetches trading data from Polymarket's official API"""
 
     BASE_URL = "https://data-api.polymarket.com"
+    REQUEST_DELAY_SECONDS = 0.5  # Delay between requests to avoid rate limiting
+    MAX_RETRIES = 3  # Maximum retry attempts for 408/429 errors
+    RETRY_DELAY_BASE = 1.0  # Base delay for exponential backoff
 
     def __init__(self):
         self.session = requests.Session()
@@ -42,14 +46,38 @@ class PolymarketAPIFetcher:
             'sortDirection': sort_direction
         }
 
-        response = self.session.get(endpoint, params=params)
-
-        if response.status_code == 200:
-            return response.json()
-        else:
-            print(f"Error fetching closed positions: {response.status_code}")
-            print(f"Response: {response.text}")
-            return None
+        # Retry logic with exponential backoff for 408/429 errors
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                response = self.session.get(endpoint, params=params, timeout=30)
+                
+                if response.status_code == 200:
+                    return response.json()
+                elif response.status_code in (408, 429):  # Request timeout or rate limit
+                    if attempt < self.MAX_RETRIES - 1:
+                        wait_time = self.RETRY_DELAY_BASE * (2 ** attempt)  # Exponential backoff
+                        print(f"API rate limit/timeout (HTTP {response.status_code}), retrying in {wait_time:.1f}s... (attempt {attempt + 1}/{self.MAX_RETRIES})")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        print(f"Error fetching closed positions: {response.status_code} (max retries exceeded)")
+                        print(f"Response: {response.text}")
+                        return None
+                else:
+                    print(f"Error fetching closed positions: {response.status_code}")
+                    print(f"Response: {response.text}")
+                    return None
+            except requests.exceptions.Timeout:
+                if attempt < self.MAX_RETRIES - 1:
+                    wait_time = self.RETRY_DELAY_BASE * (2 ** attempt)
+                    print(f"Request timeout, retrying in {wait_time:.1f}s... (attempt {attempt + 1}/{self.MAX_RETRIES})")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"Error fetching closed positions: Request timeout (max retries exceeded)")
+                    return None
+        
+        return None
 
     def get_all_closed_positions(self, wallet_address, cutoff_timestamp=None):
         """
@@ -100,6 +128,8 @@ class PolymarketAPIFetcher:
                 break
 
             offset += limit
+            # Rate limiting: Add delay between requests to avoid 408 timeouts
+            time.sleep(self.REQUEST_DELAY_SECONDS)
 
         print(f"\nTotal closed positions fetched: {len(all_positions)}\n")
         return all_positions
@@ -127,14 +157,38 @@ class PolymarketAPIFetcher:
         if side:
             params['side'] = side
 
-        response = self.session.get(endpoint, params=params)
-
-        if response.status_code == 200:
-            return response.json()
-        else:
-            print(f"Error fetching trades: {response.status_code}")
-            print(f"Response: {response.text}")
-            return None
+        # Retry logic with exponential backoff for 408/429 errors
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                response = self.session.get(endpoint, params=params, timeout=30)
+                
+                if response.status_code == 200:
+                    return response.json()
+                elif response.status_code in (408, 429):  # Request timeout or rate limit
+                    if attempt < self.MAX_RETRIES - 1:
+                        wait_time = self.RETRY_DELAY_BASE * (2 ** attempt)
+                        print(f"API rate limit/timeout (HTTP {response.status_code}), retrying in {wait_time:.1f}s... (attempt {attempt + 1}/{self.MAX_RETRIES})")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        print(f"Error fetching trades: {response.status_code} (max retries exceeded)")
+                        print(f"Response: {response.text}")
+                        return None
+                else:
+                    print(f"Error fetching trades: {response.status_code}")
+                    print(f"Response: {response.text}")
+                    return None
+            except requests.exceptions.Timeout:
+                if attempt < self.MAX_RETRIES - 1:
+                    wait_time = self.RETRY_DELAY_BASE * (2 ** attempt)
+                    print(f"Request timeout, retrying in {wait_time:.1f}s... (attempt {attempt + 1}/{self.MAX_RETRIES})")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"Error fetching trades: Request timeout (max retries exceeded)")
+                    return None
+        
+        return None
 
     def get_all_trades(self, wallet_address, cutoff_timestamp=None):
         """
@@ -189,6 +243,8 @@ class PolymarketAPIFetcher:
                 break
 
             offset += limit
+            # Rate limiting: Add delay between requests to avoid 408 timeouts
+            time.sleep(self.REQUEST_DELAY_SECONDS)
 
         # Warning if we hit the API limit without a cutoff
         if hit_api_limit:
