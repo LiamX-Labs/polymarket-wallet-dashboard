@@ -18,9 +18,9 @@ class PolymarketAPIFetcher:
     """Fetches trading data from Polymarket's official API"""
 
     BASE_URL = "https://data-api.polymarket.com"
-    REQUEST_DELAY_SECONDS = 0.3  # Delay between requests to avoid rate limiting
-    MAX_RETRIES = 3  # Maximum retry attempts for 408/429 errors
-    RETRY_DELAY_BASE = 1.0  # Base delay for exponential backoff
+    REQUEST_DELAY_SECONDS = 0.5  # Increased from 0.3 to be safer
+    MAX_RETRIES = 5  # Increased from 3 to handle temporary Cloudflare bans
+    RETRY_DELAY_BASE = 2.0  # Increased from 1.0 for more conservative backoff
 
     def __init__(self):
         self.session = requests.Session()
