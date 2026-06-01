@@ -25,6 +25,7 @@ if __package__ in {None, ""}:
     from tracker.notifier import TrackerNotifier
     from tracker.tracker_db import TrackerDB
     from tracker.wallet_profiler import WalletProfiler
+    from tracker.wallet_filter_pipeline import WalletFilterPipeline
 else:
     from .clob_client import CLOBClient
     from .daily_alpha_report import run_daily_report
@@ -32,6 +33,7 @@ else:
     from .notifier import TrackerNotifier
     from .tracker_db import TrackerDB
     from .wallet_profiler import WalletProfiler
+    from .wallet_filter_pipeline import WalletFilterPipeline
 
 
 logging.basicConfig(
@@ -46,6 +48,7 @@ class BTCMarketTracker:
         self.gamma = GammaClient()
         self.clob = CLOBClient()
         self.profiler = WalletProfiler()
+        self.filter_pipeline = WalletFilterPipeline()
         self.db = TrackerDB(TRACKER_DATABASE_PATH)
         self.db.init_schema()
         self.notifier = TrackerNotifier()
@@ -161,7 +164,7 @@ class BTCMarketTracker:
         # Use numeric_id for Data API if available
         market_identifier = market.numeric_id if market.numeric_id else market.market_id
 
-        # Step 1: Get top wallets by position value in THIS market only
+        # Step 1: Get initial candidate wallets from market positions
         pnl_limit = 50  # Fetch top 50 by position value
         pnl_rankings = self.clob.get_market_pnl_rankings(market_identifier, limit=pnl_limit)
 
@@ -171,94 +174,85 @@ class BTCMarketTracker:
             sample_size = 5 if market.timeframe in {"5m", "15m"} else 10
             snapshots = self.clob.get_top_positions(market_identifier, sample_size=sample_size)
             all_positions = snapshots["UP"] + snapshots["DOWN"]
-            wallets = [p.wallet for p in all_positions]
+            candidate_wallets = [p.wallet for p in all_positions]
         else:
             # We have position value rankings from trades
-            wallets = [r["wallet"] for r in pnl_rankings]
+            candidate_wallets = [r["wallet"] for r in pnl_rankings]
             # Get position details (side, entry price, timestamps) for these wallets
             snapshots = self.clob.get_top_positions(market_identifier, sample_size=pnl_limit)
             all_positions = snapshots["UP"] + snapshots["DOWN"]
 
-        logger.info("Stage 1: Position value filter | wallets=%s ranked_by=position_value", len(wallets))
-
-        # Step 2: HFT Pre-filter using 4-hour activity check
-        hft_results = self.profiler.hft_prefilter_4h(wallets)
-        hft_map = {r["wallet"]: r["hft_flag"] for r in hft_results}
-
-        non_hft_wallets = [w for w in wallets if not hft_map.get(w, False)]
-        logger.info("Stage 2: HFT pre-filter | wallets_before=%s wallets_after=%s", len(wallets), len(non_hft_wallets))
-
-        # Step 3: Deep scan - 7-day performance on top 10 only
-        top_10_wallets = non_hft_wallets[:10]
-        stats_7d = self.profiler.profile_7d(top_10_wallets) if top_10_wallets else []
-        stat_map = {s["wallet"]: s for s in stats_7d}
-
         logger.info(
-            "Stage 3: Deep scan 7d | wallets_scanned=%s wallets_with_btc_history=%s filtered_out=%s",
-            len(top_10_wallets),
-            len(stats_7d),
-            len(top_10_wallets) - len(stats_7d)
+            "Initial candidate wallets | wallets=%s from_market=%s",
+            len(candidate_wallets),
+            market.title,
         )
 
-        # Step 4: Rank final 10 by 7-day performance
-        ranked = []
-        for wallet in top_10_wallets:
-            ws = stat_map.get(wallet)
-            if not ws:
-                continue
+        # Step 2: Run the 4-stage filter pipeline
+        # This filters by: profit > $1, hold_time >= 10min, trade_count >= 20, performance criteria
+        top_wallets = self.filter_pipeline.run_pipeline(candidate_wallets, market_title=market.title)
 
-            # Find position data for this wallet
-            pos = next((p for p in all_positions if p.wallet == wallet), None)
-            if not pos:
-                continue
-
-            rank_score = self.profiler.rank_score(ws)
-            copyability = self.profiler.copyability_score(
-                position_first_seen_ts=pos.first_seen_ts,
-                trigger_ts=trigger_ts,
-                size=pos.size,
-                hft_flag=ws.get("hft_flag", False),
+        # Early exit if no wallets qualify
+        if not top_wallets:
+            logger.warning(
+                "No wallets qualified from pipeline | market=%s",
+                market.title,
             )
-            ranked.append(
-                {
-                    "wallet": wallet,
-                    "side": pos.side,
-                    "entry_price": pos.entry_price,
-                    "size": pos.size,
-                    "value": pos.value,
-                    "rank_score": rank_score,
-                    "copyability_score": copyability,
-                    "roi_7d": ws["roi"],
-                    "win_rate_7d": ws["win_rate"],
-                }
-            )
+            # Still save the scan event for record-keeping
+            self.db.create_scan_event(market.market_id, trigger_ts, progress_pct)
+            return
 
-        # Sort by 7-day ROI (descending)
-        ranked.sort(key=lambda x: x["roi_7d"], reverse=True)
-        top_5 = ranked[:5]
-
+        # Step 3: Take top 5 qualified wallets for detailed processing
+        top_5 = top_wallets[:5]
         logger.info(
-            "Stage 4: Final ranking | total_ranked=%s top_5=%s",
-            len(ranked),
+            "Final qualified wallets | total_qualified=%s top_5=%s",
+            len(top_wallets),
             len(top_5),
         )
 
-        # Fetch closed positions and calculate performance metrics for TOP 5 wallets BEFORE saving
-        logger.info(f"Fetching closed positions from Polymarket API for top {len(top_5)} wallets...")
+        # Step 4: Enrich top 5 with current market position data
+        wallet_closed_positions = {}  # Cache for hold time calculations
+        enriched_picks = []
+
+        for wallet_data in top_5:
+            wallet = wallet_data["wallet"]
+
+            # Find position data for this wallet in current market
+            pos = next((p for p in all_positions if p.wallet == wallet), None)
+
+            try:
+                # Fetch closed positions for hold time calculation
+                positions = self.profiler.get_all_positions_7d(wallet)
+                wallet_closed_positions[wallet] = positions
+
+                enriched_picks.append({
+                    "wallet": wallet,
+                    "side": pos.side if pos else "UNKNOWN",
+                    "entry_price": pos.entry_price if pos else 0.0,
+                    "size": pos.size if pos else 0.0,
+                    "value": pos.value if pos else 0.0,
+                    "roi_4d": wallet_data.get("roi", 0.0),
+                    "win_rate_4d": wallet_data.get("win_rate", 0.0),
+                    "avg_return_per_trade": wallet_data.get("avg_return_per_trade", 0.0),
+                    "num_trades": wallet_data.get("num_trades", 0),
+                })
+            except Exception as e:
+                logger.warning(
+                    "Failed to enrich wallet %s: %s, skipping",
+                    wallet[:10],
+                    str(e),
+                )
+
+        # Step 5: Calculate full performance metrics for enriched picks
+        logger.info(f"Calculating performance metrics for {len(enriched_picks)} qualified wallets...")
         top_5_performance = []
-        wallet_closed_positions = {}  # Cache closed positions for later use
-        for pick in top_5:
+
+        for pick in enriched_picks:
             wallet = pick["wallet"]
             try:
-                # Fetch ALL closed positions for this wallet from Polymarket API
-                positions = self.profiler.get_all_positions_7d(wallet)
-                wallet_closed_positions[wallet] = positions  # Cache for later use
-                logger.info(f"  {wallet}: fetched {len(positions)} closed positions")
-
-                # Calculate detailed P&L metrics from actual closed positions
+                positions = wallet_closed_positions.get(wallet, [])
                 metrics = self.profiler.calculate_pnl_metrics(positions)
 
-                # Combine pick data with performance metrics
                 performance = {
                     "wallet": wallet,
                     "scan_event_id": None,  # Will be set after scan_event is created
@@ -267,9 +261,7 @@ class BTCMarketTracker:
                     "entry_price": pick["entry_price"],
                     "size": pick["size"],
                     "value": pick["value"],
-                    "rank_score": pick["rank_score"],
-                    "copyability_score": pick["copyability_score"],
-                    # Performance metrics from closed positions
+                    # Performance metrics (from 4-day history used in pipeline)
                     "total_profits": metrics["total_profits"],
                     "total_losses": metrics["total_losses"],
                     "profit_factor": metrics["profit_factor"],
@@ -282,11 +274,14 @@ class BTCMarketTracker:
                     "best_trade_timestamp": metrics["best_trade_timestamp"],
                     "worst_trade_timestamp": metrics["worst_trade_timestamp"],
                     "total_positions": metrics["total_positions"],
+                    # Pipeline metrics
+                    "roi_4d": pick.get("roi_4d", 0.0),
+                    "win_rate_4d": pick.get("win_rate_4d", 0.0),
                 }
                 top_5_performance.append(performance)
             except Exception as e:
-                logger.error(f"Failed to fetch/calculate performance for {wallet}: {e}")
-                # Still include wallet but with zero metrics
+                logger.error(f"Failed to calculate performance for {wallet}: {e}")
+                # Still include wallet with partial metrics
                 top_5_performance.append({
                     "wallet": wallet,
                     "scan_event_id": None,
@@ -295,8 +290,6 @@ class BTCMarketTracker:
                     "entry_price": pick["entry_price"],
                     "size": pick["size"],
                     "value": pick["value"],
-                    "rank_score": pick["rank_score"],
-                    "copyability_score": pick["copyability_score"],
                     "total_profits": 0.0,
                     "total_losses": 0.0,
                     "profit_factor": 0.0,
@@ -309,11 +302,13 @@ class BTCMarketTracker:
                     "best_trade_timestamp": None,
                     "worst_trade_timestamp": None,
                     "total_positions": 0,
+                    "roi_4d": pick.get("roi_4d", 0.0),
+                    "win_rate_4d": pick.get("win_rate_4d", 0.0),
                 })
 
         logger.info(f"Calculated performance metrics for {len(top_5_performance)} wallets")
 
-        # Save to database
+        # Step 6: Save to database
         scan_event_id = self.db.create_scan_event(market.market_id, trigger_ts, progress_pct)
 
         # Update scan_event_id in performance data
@@ -331,26 +326,19 @@ class BTCMarketTracker:
                     "size": p["size"],
                     "value": p["value"],
                 }
-                for p in top_5
+                for p in enriched_picks
             ],
         )
 
-        # Save wallet stats (for all wallets that were profiled)
-        self.db.save_wallet_stats_7d(stats_7d)
-
         # Save top wallet picks
-        self.db.save_top_wallet_picks(scan_event_id, top_5, market.timeframe)
+        self.db.save_top_wallet_picks(scan_event_id, enriched_picks, market.timeframe)
 
         # Save performance metrics for top 5 wallets
         self.db.save_top_wallet_performance(top_5_performance)
         logger.info(f"Saved performance metrics for top {len(top_5_performance)} wallets")
 
         # Update unified dashboard summary table for optimized retrieval
-        # This combines all data needed by the dashboard in a single denormalized table
         for perf in top_5_performance:
-            # Get additional data from stats
-            wallet_stats = next((s for s in stats_7d if s["wallet"] == perf["wallet"]), None)
-
             # Get position history for this wallet (scanner observations)
             positions = self.db.conn.execute(
                 """SELECT mp.*, se.trigger_ts
@@ -378,7 +366,7 @@ class BTCMarketTracker:
             win_rate_from_closed = (perf["num_wins"] / total_closed * 100) if total_closed > 0 else 0
 
             # Calculate avg trades per day from closed positions
-            avg_trades_per_day_from_closed = total_closed / 7 if total_closed > 0 else 0
+            avg_trades_per_day_from_closed = total_closed / 4 if total_closed > 0 else 0  # 4-day lookback
 
             dashboard_data = {
                 "wallet": perf["wallet"],
@@ -393,12 +381,12 @@ class BTCMarketTracker:
                 "avg_time_between_positions": avg_time_between,
                 "last_position_timestamp": recent_position["trigger_ts"] if recent_position else None,
 
-                # Track record - ALL from closed positions
+                # Track record - from 4-day closed positions
                 "win_rate": win_rate_from_closed,
                 "total_trades": total_closed,
                 "avg_trades_per_day": avg_trades_per_day_from_closed,
                 "avg_hold_time_seconds": avg_hold_time,
-                "avg_trade_size": wallet_stats["avg_trade_size"] if wallet_stats else 0,
+                "avg_trade_size": 0,  # Would need additional data
 
                 # Performance metrics from closed positions
                 "total_profits": perf["total_profits"],
@@ -430,12 +418,10 @@ class BTCMarketTracker:
                     "wallet": p["wallet"],
                     "side": p["side"],
                     "entry_price": p["entry_price"],
-                    "roi_7d": p["roi_7d"],
-                    "win_rate_7d": p["win_rate_7d"],
-                    "rank_score": p["rank_score"],
-                    "copyability_score": p["copyability_score"],
+                    "roi_4d": p.get("roi_4d", 0.0),
+                    "win_rate_4d": p.get("win_rate_4d", 0.0),
                 }
-                for p in top_5
+                for p in enriched_picks
             ],
         }
         await self.notifier.send_market_alert(alert_payload)

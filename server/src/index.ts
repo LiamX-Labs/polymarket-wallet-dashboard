@@ -26,6 +26,15 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
+// Serve static files from client build
+const clientDistPath = path.join(__dirname, '../../client/dist');
+if (fs.existsSync(clientDistPath)) {
+  app.use(express.static(clientDistPath));
+  console.log(`[SERVER] Serving static files from ${clientDistPath}`);
+} else {
+  console.warn(`[SERVER] Client dist directory not found at ${clientDistPath}`);
+}
+
 // Ensure dashboard database directory exists
 const dashboardDbDir = path.dirname(DASHBOARD_DB_PATH);
 if (!fs.existsSync(dashboardDbDir)) {
@@ -58,6 +67,19 @@ let syncService: SyncService | null = null;
 
 // Routes
 app.use('/api/wallets', createWalletsRouter(dashboardDb));
+
+// SPA fallback - serve index.html for any non-API routes
+app.get(/^\/(?!api\/)/, (req, res) => {
+  const indexPath = path.join(__dirname, '../../client/dist/index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).json({
+      success: false,
+      error: 'Client build not found. Please run `cd client && npm run build`',
+    });
+  }
+});
 
 // Root endpoint
 app.get('/', (req, res) => {
