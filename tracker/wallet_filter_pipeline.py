@@ -11,6 +11,7 @@ Implements 4-stage filtering:
 import logging
 from datetime import datetime, timedelta
 from typing import Iterable, List, Dict, Tuple
+import signal
 
 if __package__ in {None, ""}:
     from polymarket_api_fetcher import PolymarketAPIFetcher
@@ -168,21 +169,38 @@ class WalletFilterPipeline:
             (datetime.utcnow() - timedelta(days=self.lookback_days)).timestamp()
         )
         passed = []
+        skipped = 0
+        max_time_per_wallet = 5.0  # Max 5 seconds per wallet to fetch positions
 
-        for wallet in wallets:
+        for i, wallet in enumerate(wallets):
+            start_time = datetime.utcnow()
             try:
+                logger.debug("Stage 1: Fetching positions for wallet %d/%d (%s...)", i+1, len(wallets), wallet[:8])
                 positions = self.fetcher.get_all_closed_positions(
                     wallet, cutoff_timestamp=cutoff_timestamp
                 )
+                elapsed = (datetime.utcnow() - start_time).total_seconds()
+                
                 if not positions:
+                    logger.debug("Stage 1: Wallet %s returned 0 positions (%.2fs)", wallet[:8], elapsed)
                     continue
 
                 total_pnl = sum(float(p.get("realizedPnl", 0) or 0) for p in positions)
+                elapsed = (datetime.utcnow() - start_time).total_seconds()
+                
+                logger.debug("Stage 1: Wallet %s has $%.2f PnL from %d positions (%.2fs)", 
+                           wallet[:8], total_pnl, len(positions), elapsed)
 
                 if total_pnl > self.min_profit:
                     passed.append(wallet)
             except Exception as e:
-                logger.debug("Error fetching positions for wallet %s: %s", wallet[:10], str(e))
+                elapsed = (datetime.utcnow() - start_time).total_seconds()
+                logger.debug("Stage 1: Error fetching positions for wallet %s after %.2fs: %s", 
+                           wallet[:8], elapsed, str(e))
+                skipped += 1
+
+        if skipped > 0:
+            logger.debug("Stage 1: Skipped %d wallets due to errors", skipped)
 
         return passed
 

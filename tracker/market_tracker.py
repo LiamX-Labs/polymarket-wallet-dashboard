@@ -165,13 +165,14 @@ class BTCMarketTracker:
         market_identifier = market.numeric_id if market.numeric_id else market.market_id
 
         # Step 1: Get initial candidate wallets from market positions
-        pnl_limit = 50  # Fetch top 50 by position value
+        # Limit to top 20 for faster pipeline processing (was 50)
+        pnl_limit = 20
         pnl_rankings = self.clob.get_market_pnl_rankings(market_identifier, limit=pnl_limit)
 
         if not pnl_rankings:
             # Fallback: use position size if no trades data available
             logger.warning("No position data for market %s, falling back to position size", market.title)
-            sample_size = 5 if market.timeframe in {"5m", "15m"} else 10
+            sample_size = 5 if market.timeframe in {"5m", "15m"} else 8
             snapshots = self.clob.get_top_positions(market_identifier, sample_size=sample_size)
             all_positions = snapshots["UP"] + snapshots["DOWN"]
             candidate_wallets = [p.wallet for p in all_positions]
