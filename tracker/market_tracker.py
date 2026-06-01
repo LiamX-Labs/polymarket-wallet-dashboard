@@ -166,7 +166,7 @@ class BTCMarketTracker:
 
         # Step 1: Get initial candidate wallets from market positions
         # Limit to top 20 for faster pipeline processing (was 50)
-        pnl_limit = 20
+        pnl_limit = 100
         pnl_rankings = self.clob.get_market_pnl_rankings(market_identifier, limit=pnl_limit)
 
         if not pnl_rankings:
@@ -207,7 +207,7 @@ class BTCMarketTracker:
             return
 
         # Step 3: Take top 5 qualified wallets for detailed processing
-        top_5 = top_wallets[:5]
+        top_5 = top_wallets[:10]
         logger.info(
             "Final qualified wallets | total_qualified=%s top_5=%s",
             len(top_wallets),
