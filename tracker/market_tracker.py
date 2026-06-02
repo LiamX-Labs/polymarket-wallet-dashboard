@@ -235,6 +235,23 @@ class BTCMarketTracker:
                 
                 wallet_closed_positions[wallet] = positions
 
+                # Calculate scores for database
+                rank_score = self.profiler.rank_score({
+                    "roi": wallet_data.get("roi", 0.0),
+                    "win_rate": wallet_data.get("win_rate", 0.0),
+                    "trade_count": wallet_data.get("num_trades", 0)
+                })
+                
+                # Check for HFT (used in copyability)
+                hft_flag = self.profiler.is_hft_from_positions(positions) if positions else False
+                
+                copy_score = self.profiler.copyability_score(
+                    position_first_seen_ts=pos.first_seen_ts if pos else None,
+                    trigger_ts=trigger_ts,
+                    size=pos.size if pos else 0.0,
+                    hft_flag=hft_flag
+                )
+
                 enriched_picks.append({
                     "wallet": wallet,
                     "side": pos.side if pos else "UNKNOWN",
@@ -245,6 +262,8 @@ class BTCMarketTracker:
                     "win_rate_4d": wallet_data.get("win_rate", 0.0),
                     "avg_return_per_trade": wallet_data.get("avg_return_per_trade", 0.0),
                     "num_trades": wallet_data.get("num_trades", 0),
+                    "rank_score": rank_score,
+                    "copyability_score": copy_score,
                 })
             except Exception as e:
                 logger.warning(
@@ -271,6 +290,8 @@ class BTCMarketTracker:
                     "entry_price": pick["entry_price"],
                     "size": pick["size"],
                     "value": pick["value"],
+                    "rank_score": pick["rank_score"],
+                    "copyability_score": pick["copyability_score"],
                     # Performance metrics (from 4-day history used in pipeline)
                     "total_profits": metrics["total_profits"],
                     "total_losses": metrics["total_losses"],
@@ -300,6 +321,8 @@ class BTCMarketTracker:
                     "entry_price": pick["entry_price"],
                     "size": pick["size"],
                     "value": pick["value"],
+                    "rank_score": pick["rank_score"],
+                    "copyability_score": pick["copyability_score"],
                     "total_profits": 0.0,
                     "total_losses": 0.0,
                     "profit_factor": 0.0,
