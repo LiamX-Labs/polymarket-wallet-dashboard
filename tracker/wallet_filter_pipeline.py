@@ -35,6 +35,11 @@ class WalletFilterPipeline:
     DEFAULT_MIN_AVG_RETURN = 70.0
     MAX_WORKERS = 5  # Reduced from 10 to avoid 429 rate limits
 
+    # PART 3 — Bitcoin wallet discovery qualification thresholds.
+    # Both must be satisfied before a wallet is admitted to the tracker universe.
+    BITCOIN_MIN_TRADES = 10
+    BITCOIN_MIN_VOLUME_PCT = 0.50  # 50 %
+
     def __init__(
         self,
         lookback_days: int = DEFAULT_LOOKBACK_DAYS,
@@ -53,6 +58,60 @@ class WalletFilterPipeline:
         self.min_trade_count = min_trade_count
         self.min_win_rate = min_win_rate
         self.min_avg_return = min_avg_return
+
+    @staticmethod
+    def _is_bitcoin_market(title: str) -> bool:
+        """Case-insensitive check for Bitcoin in a market title."""
+        return "bitcoin" in (title or "").lower()
+
+    def _qualifies_as_bitcoin_wallet(self, wallet: str, positions: list) -> bool:
+        """
+        PART 3 — Bitcoin wallet discovery filter.
+
+        Returns True only if BOTH conditions are met:
+          • bitcoinTradeCount  >= BITCOIN_MIN_TRADES   (>= 10)
+          • bitcoinVolumePct   >= BITCOIN_MIN_VOLUME_PCT  (>= 50%)
+
+        bitcoinVolumePct = bitcoin_volume / total_volume
+        where volume is calculated as avgPrice * totalBought per position.
+
+        Case-insensitive "bitcoin" match is applied to the market title field
+        of each closed position returned by the Polymarket API.
+        """
+        if not positions:
+            return False
+
+        bitcoin_trade_count = 0
+        bitcoin_volume = 0.0
+        total_volume = 0.0
+
+        for p in positions:
+            title = p.get("title", "") or p.get("question", "") or p.get("market", "") or ""
+            avg_price = float(p.get("avgPrice", 0) or 0)
+            total_bought = float(p.get("totalBought", 0) or 0)
+            position_volume = avg_price * total_bought
+
+            total_volume += position_volume
+
+            if self._is_bitcoin_market(title):
+                bitcoin_trade_count += 1
+                bitcoin_volume += position_volume
+
+        bitcoin_volume_pct = (bitcoin_volume / total_volume) if total_volume > 0 else 0.0
+
+        qualifies = (
+            bitcoin_trade_count >= self.BITCOIN_MIN_TRADES
+            and bitcoin_volume_pct >= self.BITCOIN_MIN_VOLUME_PCT
+        )
+
+        if not qualifies:
+            logger.debug(
+                "Wallet %s excluded by Bitcoin filter: btc_trades=%d btc_vol_pct=%.1f%%",
+                wallet[:10],
+                bitcoin_trade_count,
+                bitcoin_volume_pct * 100,
+            )
+        return qualifies
 
     def run_pipeline(self, candidate_wallets: Iterable[str], market_title: str = None) -> Tuple[List[Dict], Dict[str, List[Dict]]]:
         """
@@ -89,14 +148,38 @@ class WalletFilterPipeline:
         )
         wallet_data = self._fetch_all_wallets_parallel(wallets, cutoff_timestamp)
 
+        # Stage 0 (discovery gate): Bitcoin wallet qualification filter.
+        # Applied BEFORE any performance stages.
+        # Only wallets with >= 10 Bitcoin trades AND >= 50% Bitcoin volume are admitted.
+        stage0_wallets = [
+            w for w in wallets
+            if self._qualifies_as_bitcoin_wallet(w, wallet_data.get(w, []))
+        ]
+        logger.info(
+            "Pipeline Stage 0: Bitcoin Qualification Filter | "
+            "min_trades=%d min_btc_vol_pct=%.0f%% passed=%d filtered_out=%d",
+            self.BITCOIN_MIN_TRADES,
+            self.BITCOIN_MIN_VOLUME_PCT * 100,
+            len(stage0_wallets),
+            len(wallets) - len(stage0_wallets),
+        )
+        if not stage0_wallets:
+            logger.warning(
+                "Pipeline STOPPED at Stage 0: No wallets meet Bitcoin qualification "
+                "(>= %d btc trades, >= %.0f%% btc volume)",
+                self.BITCOIN_MIN_TRADES,
+                self.BITCOIN_MIN_VOLUME_PCT * 100,
+            )
+            return [], wallet_data
+
         # Stage 1: Minimum Profit Filter
-        stage1_wallets = self._filter_by_minimum_profit(wallets, wallet_data)
+        stage1_wallets = self._filter_by_minimum_profit(stage0_wallets, wallet_data)
         logger.info(
             "Pipeline Stage 1: Profit Filter | threshold=$%.2f "
             "passed=%s filtered_out=%s",
             self.min_profit,
             len(stage1_wallets),
-            len(wallets) - len(stage1_wallets),
+            len(stage0_wallets) - len(stage1_wallets),
         )
 
         # Early exit if no wallets pass stage 1
@@ -156,9 +239,10 @@ class WalletFilterPipeline:
 
         logger.info(
             "Pipeline COMPLETE | market=%s qualified=%s "
-            "stage1=%s→stage2=%s→stage3=%s→stage4=%s",
+            "stage0=%s→stage1=%s→stage2=%s→stage3=%s→stage4=%s",
             context["market"],
             len(qualified_wallets),
+            len(stage0_wallets),
             len(stage1_wallets),
             len(stage2_wallets),
             len(stage3_wallets),

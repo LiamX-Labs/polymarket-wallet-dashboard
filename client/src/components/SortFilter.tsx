@@ -10,7 +10,9 @@ interface SortFilterProps {
 }
 
 export function SortFilter({ sortBy, sortOrder, onSort, avgTradeSize, onAvgTradeSizeFilter }: SortFilterProps) {
-  const [filterValue, setFilterValue] = useState(avgTradeSize?.value?.toString() || '');
+  // PART 2 FIX: Initialize local state from the active filter (which defaults to <= $50)
+  // This keeps the UI input fields in sync with the default filter on initial render
+  const [filterValue, setFilterValue] = useState(avgTradeSize?.value?.toString() || '50');
   const [filterOperator, setFilterOperator] = useState(avgTradeSize?.operator || '<=');
 
   const sortOptions: { label: string; field: SortField }[] = [
@@ -93,6 +95,7 @@ export function SortFilter({ sortBy, sortOrder, onSort, avgTradeSize, onAvgTrade
         >
           Apply
         </button>
+        {/* Show Clear whenever there's an active filter (including the default) */}
         {avgTradeSize && (
           <button
             onClick={handleClearFilter}

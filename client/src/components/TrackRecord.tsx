@@ -57,9 +57,9 @@ export function TrackRecord({ wallet }: TrackRecordProps) {
         <div className="font-semibold text-accent-green text-center">{formatCurrency(wallet.avg_win)}</div>
       </div>
 
-      {/* Avg $ loss */}
+      {/* Avg $ loss — FIX: was incorrectly using wallet.avg_win */}
       <div className="flex flex-col w-[60px]">
-        <div className="font-semibold text-accent-red text-center">{formatCurrency(wallet.avg_win)}</div>
+        <div className="font-semibold text-accent-red text-center">-{formatCurrency(wallet.avg_loss)}</div>
       </div>
 
       {/* Best Trade $ / time ago */}
@@ -73,12 +73,12 @@ export function TrackRecord({ wallet }: TrackRecordProps) {
       {/* Worst Trade $ / time ago */}
       <div className="flex flex-col w-[70px]">
         <div className="font-semibold text-accent-red text-center">
-          {formatCurrency(wallet.worst_trade_amount)}
+          -{formatCurrency(Math.abs(wallet.worst_trade_amount))}
         </div>
         <div className="text-gray-400 text-[11px] text-center">{formatTimeAgo(wallet.worst_trade_time_ago)}</div>
       </div>
 
-      {/* Best Perf $ / # wins */}
+      {/* Best Perf $ / # wins — cumulative winning streak */}
       <div className="flex flex-col w-[70px]">
         <div className="font-semibold text-accent-green text-center">
           {formatCurrency(wallet.best_perf_amount)}
@@ -86,10 +86,10 @@ export function TrackRecord({ wallet }: TrackRecordProps) {
         <div className="text-gray-400 text-[11px] text-center">{wallet.best_perf_count} wins</div>
       </div>
 
-      {/* Worst Perf $ / # losses */}
+      {/* Worst Perf $ / # losses — cumulative losing streak */}
       <div className="flex flex-col w-[70px]">
         <div className="font-semibold text-accent-red text-center">
-          {formatCurrency(wallet.worst_perf_amount)}
+          -{formatCurrency(Math.abs(wallet.worst_perf_amount))}
         </div>
         <div className="text-gray-400 text-[11px] text-center">{wallet.worst_perf_count} losses</div>
       </div>

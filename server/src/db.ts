@@ -1,5 +1,4 @@
 import Database from 'better-sqlite3';
-import path from 'path';
 import { WalletStats } from './types';
 
 export class DashboardDB {
@@ -38,8 +37,10 @@ export class DashboardDB {
         worst_trade_time_ago INTEGER,
         best_perf_amount REAL DEFAULT 0,
         best_perf_time_ago INTEGER,
+        best_perf_count INTEGER DEFAULT 0,
         worst_perf_amount REAL DEFAULT 0,
         worst_perf_time_ago INTEGER,
+        worst_perf_count INTEGER DEFAULT 0,
         num_wins INTEGER DEFAULT 0,
         num_losses INTEGER DEFAULT 0,
         avg_trade_size REAL DEFAULT 0,
@@ -48,11 +49,34 @@ export class DashboardDB {
         last_updated INTEGER NOT NULL
       );
 
-      CREATE INDEX IF NOT EXISTS idx_profit_24h ON wallet_dashboard_stats(profit_24h);
-      CREATE INDEX IF NOT EXISTS idx_win_rate ON wallet_dashboard_stats(win_rate);
-      CREATE INDEX IF NOT EXISTS idx_total_trades ON wallet_dashboard_stats(total_trades);
-      CREATE INDEX IF NOT EXISTS idx_last_updated ON wallet_dashboard_stats(last_updated);
+      CREATE INDEX IF NOT EXISTS idx_profit_24h    ON wallet_dashboard_stats(profit_24h);
+      CREATE INDEX IF NOT EXISTS idx_win_rate      ON wallet_dashboard_stats(win_rate);
+      CREATE INDEX IF NOT EXISTS idx_total_trades  ON wallet_dashboard_stats(total_trades);
+      CREATE INDEX IF NOT EXISTS idx_last_updated  ON wallet_dashboard_stats(last_updated);
+      CREATE INDEX IF NOT EXISTS idx_avg_trade_size ON wallet_dashboard_stats(avg_trade_size);
     `);
+
+    // Migrate existing databases that were created before best_perf_count /
+    // worst_perf_count columns existed.
+    this.addColumnIfMissing('best_perf_count',  'INTEGER DEFAULT 0');
+    this.addColumnIfMissing('worst_perf_count', 'INTEGER DEFAULT 0');
+  }
+
+  /** Safely add a column to wallet_dashboard_stats if it does not already exist. */
+  private addColumnIfMissing(column: string, definition: string): void {
+    try {
+      const existing = this.db
+        .prepare(`PRAGMA table_info(wallet_dashboard_stats)`)
+        .all() as Array<{ name: string }>;
+      if (!existing.some((c) => c.name === column)) {
+        this.db.exec(
+          `ALTER TABLE wallet_dashboard_stats ADD COLUMN ${column} ${definition}`
+        );
+        console.log(`[DB] Added missing column: ${column}`);
+      }
+    } catch (err) {
+      console.error(`[DB] Failed to add column ${column}:`, err);
+    }
   }
 
   upsertWalletStats(stats: WalletStats): void {
@@ -63,12 +87,13 @@ export class DashboardDB {
         last_position_timestamp, win_rate, total_trades, avg_trades_per_day,
         avg_hold_time_seconds, avg_win, avg_loss, best_trade_amount,
         best_trade_time_ago, worst_trade_amount, worst_trade_time_ago,
-        best_perf_amount, best_perf_time_ago,
-        worst_perf_amount, worst_perf_time_ago, num_wins, num_losses, avg_trade_size,
+        best_perf_amount, best_perf_time_ago, best_perf_count,
+        worst_perf_amount, worst_perf_time_ago, worst_perf_count,
+        num_wins, num_losses, avg_trade_size,
         profit_factor, last_updated
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
       ON CONFLICT(wallet) DO UPDATE SET
         profit_24h = excluded.profit_24h,
@@ -90,8 +115,10 @@ export class DashboardDB {
         worst_trade_time_ago = excluded.worst_trade_time_ago,
         best_perf_amount = excluded.best_perf_amount,
         best_perf_time_ago = excluded.best_perf_time_ago,
+        best_perf_count = excluded.best_perf_count,
         worst_perf_amount = excluded.worst_perf_amount,
         worst_perf_time_ago = excluded.worst_perf_time_ago,
+        worst_perf_count = excluded.worst_perf_count,
         num_wins = excluded.num_wins,
         num_losses = excluded.num_losses,
         avg_trade_size = excluded.avg_trade_size,
@@ -120,8 +147,10 @@ export class DashboardDB {
       stats.worst_trade_time_ago,
       stats.best_perf_amount,
       stats.best_perf_time_ago,
+      stats.best_perf_count,
       stats.worst_perf_amount,
       stats.worst_perf_time_ago,
+      stats.worst_perf_count,
       stats.num_wins,
       stats.num_losses,
       stats.avg_trade_size,
@@ -133,7 +162,8 @@ export class DashboardDB {
   getAllWallets(sortBy: string = 'profit_24h', order: 'asc' | 'desc' = 'desc'): WalletStats[] {
     const validColumns = [
       'wallet', 'profit_24h', 'win_rate', 'total_trades', 'avg_trades_per_day',
-      'best_trade_amount', 'profit_factor', 'last_updated'
+      'best_trade_amount', 'profit_factor', 'last_updated', 'avg_trade_size',
+      'recent_trade_timestamp', 'avg_win', 'avg_loss', 'num_wins', 'num_losses',
     ];
 
     const column = validColumns.includes(sortBy) ? sortBy : 'profit_24h';

@@ -304,6 +304,11 @@ class BTCMarketTracker:
                     "worst_trade": metrics["worst_trade"],
                     "best_trade_timestamp": metrics["best_trade_timestamp"],
                     "worst_trade_timestamp": metrics["worst_trade_timestamp"],
+                    # Streak metrics — FIX: was missing, causing columns to show 0
+                    "best_perf_amount": metrics["best_perf_amount"],
+                    "best_perf_count": metrics["best_perf_count"],
+                    "worst_perf_amount": metrics["worst_perf_amount"],
+                    "worst_perf_count": metrics["worst_perf_count"],
                     "total_positions": metrics["total_positions"],
                     "avg_trade_size": metrics["avg_trade_size"],
                     # Pipeline metrics
@@ -335,6 +340,11 @@ class BTCMarketTracker:
                     "worst_trade": 0.0,
                     "best_trade_timestamp": None,
                     "worst_trade_timestamp": None,
+                    # Streak metrics — FIX: was missing, causing columns to show 0
+                    "best_perf_amount": 0.0,
+                    "best_perf_count": 0,
+                    "worst_perf_amount": 0.0,
+                    "worst_perf_count": 0,
                     "total_positions": 0,
                     "avg_trade_size": 0.0,
                     "roi_4d": pick.get("roi_4d", 0.0),
@@ -435,6 +445,11 @@ class BTCMarketTracker:
                 "best_trade_time_ago": perf["best_trade_timestamp"],
                 "worst_trade_amount": perf["worst_trade"],
                 "worst_trade_time_ago": perf["worst_trade_timestamp"],
+                # Streak metrics — FIX: was missing from dashboard_data, causing columns to show 0
+                "best_perf_amount": perf["best_perf_amount"],
+                "best_perf_count": perf["best_perf_count"],
+                "worst_perf_amount": perf["worst_perf_amount"],
+                "worst_perf_count": perf["worst_perf_count"],
             }
 
             self.db.upsert_wallet_dashboard_summary(dashboard_data)

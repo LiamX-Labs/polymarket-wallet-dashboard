@@ -13,13 +13,19 @@ interface UseWalletsResult {
   setAvgTradeSizeFilter: (filter: { operator: string; value: number } | null) => void;
 }
 
+// PART 2 FIX: Default filter — only wallets with avg trade size <= $50 on initial load
+const DEFAULT_AVG_TRADE_SIZE_FILTER = { operator: '<=', value: 50 };
+
 export function useWallets(): UseWalletsResult {
   const [wallets, setWallets] = useState<WalletStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortField>('last_updated');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
-  const [avgTradeSize, setAvgTradeSize] = useState<{ operator: string; value: number } | null>(null);
+  // PART 2 FIX: Initialize with the default filter instead of null
+  const [avgTradeSize, setAvgTradeSize] = useState<{ operator: string; value: number } | null>(
+    DEFAULT_AVG_TRADE_SIZE_FILTER
+  );
 
   const fetchWallets = useCallback(async () => {
     try {
