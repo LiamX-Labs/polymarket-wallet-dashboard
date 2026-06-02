@@ -205,12 +205,15 @@ class WalletProfiler:
         best_trade_data = max(winning_positions, key=lambda x: x[0]) if winning_positions else (0.0, None)
         worst_trade_data = min(losing_positions, key=lambda x: x[0]) if losing_positions else (0.0, None)
 
+        win_rate = (num_wins / len(positions) * 100.0) if positions else 0.0
+
         return {
             "total_profits": total_profits,
             "total_losses": total_losses,
             "profit_factor": profit_factor,
             "num_wins": num_wins,
             "num_losses": num_losses,
+            "win_rate": win_rate,
             "avg_win": avg_win,
             "avg_loss": avg_loss,
             "best_trade": best_trade_data[0],
