@@ -147,11 +147,15 @@ class WalletProfiler:
                 - num_wins: count of winning positions
                 - num_losses: count of losing positions
                 - avg_win: average profit per winning position
-                - avg_loss: average loss per losing position
+                - avg_loss: average loss per losing position (negative)
                 - best_trade: largest single winning position
                 - worst_trade: largest single losing position
                 - best_trade_timestamp: timestamp of best trade
                 - worst_trade_timestamp: timestamp of worst trade
+                - best_perf_amount: highest cumulative profit from a consecutive winning streak
+                - best_perf_count: number of wins in the best streak
+                - worst_perf_amount: lowest cumulative profit (most negative) from a consecutive losing streak
+                - worst_perf_count: number of losses in the worst streak
                 - total_positions: total count of closed positions
                 - avg_return_per_trade: average ROI per trade (percentage)
                 - avg_trade_size: average dollar amount committed per trade
@@ -169,18 +173,25 @@ class WalletProfiler:
                 "worst_trade": 0.0,
                 "best_trade_timestamp": None,
                 "worst_trade_timestamp": None,
+                "best_perf_amount": 0.0,
+                "best_perf_count": 0,
+                "worst_perf_amount": 0.0,
+                "worst_perf_count": 0,
                 "total_positions": 0,
                 "avg_return_per_trade": 0.0,
                 "avg_trade_size": 0.0,
             }
 
+        # Sort positions chronologically for streak calculations
+        sorted_positions = sorted(positions, key=lambda x: int(x.get("timestamp", 0) or 0))
+
         # Create list of (pnl, timestamp) tuples
-        pnl_data = [(float(p.get("realizedPnl", 0) or 0), int(p.get("timestamp", 0) or 0)) for p in positions]
+        pnl_data = [(float(p.get("realizedPnl", 0) or 0), int(p.get("timestamp", 0) or 0)) for p in sorted_positions]
 
         # Calculate individual returns and total capital for metrics
         individual_returns = []
         total_capital = 0.0
-        for p in positions:
+        for p in sorted_positions:
             pnl = float(p.get("realizedPnl", 0) or 0)
             avg_price = float(p.get("avgPrice", 0) or 0)
             total_bought = float(p.get("totalBought", 0) or 0)
@@ -196,25 +207,78 @@ class WalletProfiler:
         losing_positions = [(pnl, ts) for pnl, ts in pnl_data if pnl < 0]
 
         total_profits = sum(pnl for pnl, _ in winning_positions) if winning_positions else 0.0
-        total_losses = abs(sum(pnl for pnl, _ in losing_positions)) if losing_positions else 0.0
+        total_losses_abs = abs(sum(pnl for pnl, _ in losing_positions)) if losing_positions else 0.0
 
-        profit_factor = (total_profits / total_losses) if total_losses > 0 else 0.0
+        profit_factor = (total_profits / total_losses_abs) if total_losses_abs > 0 else 0.0
 
         num_wins = len(winning_positions)
         num_losses = len(losing_positions)
 
         avg_win = (total_profits / num_wins) if num_wins > 0 else 0.0
-        avg_loss = (total_losses / num_losses) if num_losses > 0 else 0.0
+        # Avg Loss should be negative
+        avg_loss = (-total_losses_abs / num_losses) if num_losses > 0 else 0.0
 
-        # Find best and worst trades with their timestamps
+        # Find best and worst single trades with their timestamps
         best_trade_data = max(winning_positions, key=lambda x: x[0]) if winning_positions else (0.0, None)
         worst_trade_data = min(losing_positions, key=lambda x: x[0]) if losing_positions else (0.0, None)
+
+        # Streak Calculations
+        best_perf_amount = -float('inf')
+        best_perf_count = 0
+        worst_perf_amount = float('inf')
+        worst_perf_count = 0
+        
+        has_wins = False
+        has_losses = False
+
+        # Current streak tracking
+        current_streak_pnl = 0.0
+        current_streak_count = 0
+        current_streak_type = None  # "WIN" or "LOSS"
+
+        for pnl, _ in pnl_data:
+            if pnl > 0:
+                if current_streak_type == "WIN":
+                    current_streak_pnl += pnl
+                    current_streak_count += 1
+                else:
+                    # New winning streak
+                    current_streak_pnl = pnl
+                    current_streak_count = 1
+                    current_streak_type = "WIN"
+                
+                # Update best streak
+                has_wins = True
+                if current_streak_pnl >= best_perf_amount:
+                    best_perf_amount = current_streak_pnl
+                    best_perf_count = current_streak_count
+            
+            elif pnl < 0:
+                if current_streak_type == "LOSS":
+                    current_streak_pnl += pnl
+                    current_streak_count += 1
+                else:
+                    # New losing streak
+                    current_streak_pnl = pnl
+                    current_streak_count = 1
+                    current_streak_type = "LOSS"
+                
+                # Update worst streak (most negative)
+                has_losses = True
+                if current_streak_pnl <= worst_perf_amount:
+                    worst_perf_amount = current_streak_pnl
+                    worst_perf_count = current_streak_count
+            else:
+                # Neutral trade (pnl == 0) breaks both streaks
+                current_streak_pnl = 0.0
+                current_streak_count = 0
+                current_streak_type = None
 
         win_rate = (num_wins / len(positions) * 100.0) if positions else 0.0
 
         return {
             "total_profits": total_profits,
-            "total_losses": total_losses,
+            "total_losses": total_losses_abs,
             "profit_factor": profit_factor,
             "num_wins": num_wins,
             "num_losses": num_losses,
@@ -225,6 +289,10 @@ class WalletProfiler:
             "worst_trade": worst_trade_data[0],
             "best_trade_timestamp": best_trade_data[1],
             "worst_trade_timestamp": worst_trade_data[1],
+            "best_perf_amount": best_perf_amount if has_wins else 0.0,
+            "best_perf_count": best_perf_count if has_wins else 0,
+            "worst_perf_amount": worst_perf_amount if has_losses else 0.0,
+            "worst_perf_count": worst_perf_count if has_losses else 0,
             "total_positions": len(positions),
             "avg_return_per_trade": avg_return_per_trade,
             "avg_trade_size": avg_trade_size,
