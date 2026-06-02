@@ -148,7 +148,7 @@ export class SyncService {
       avg_time_between_positions: summary.avg_time_between_positions || 0,
       last_position_timestamp: summary.last_position_timestamp || null,
 
-      // 7-Day Track Record
+      // Track Record
       win_rate: summary.win_rate || 0,
       total_trades: summary.total_trades || 0,
       avg_trades_per_day: summary.avg_trades_per_day || 0,
@@ -159,9 +159,11 @@ export class SyncService {
       avg_loss: summary.avg_loss || 0,
       best_trade_amount: summary.best_trade_amount || 0,
       best_trade_time_ago: summary.best_trade_time_ago || null,
-      best_perf_amount: summary.best_trade_amount || 0, // Same as best trade
+      worst_trade_amount: summary.worst_trade_amount || 0,
+      worst_trade_time_ago: summary.worst_trade_time_ago || null,
+      best_perf_amount: summary.best_trade_amount || 0, // Best Perf $ shows best trade amount
       best_perf_time_ago: summary.best_trade_time_ago || null,
-      worst_perf_amount: summary.worst_trade_amount || 0,
+      worst_perf_amount: summary.worst_trade_amount || 0, // Worst Perf $ shows worst trade amount
       worst_perf_time_ago: summary.worst_trade_time_ago || null,
       num_wins: summary.num_wins || 0,
       num_losses: summary.num_losses || 0,
@@ -230,7 +232,7 @@ export class SyncService {
       .get(wallet) as any;
 
     // Use actual P&L metrics if available, otherwise fall back to estimates
-    let numWins, numLosses, avgWin, avgLoss, bestTrade, worstPerf, profitFactor;
+    let numWins, numLosses, avgWin, avgLoss, bestTrade, worstTrade, profitFactor;
 
     if (performanceMetrics) {
       // Use actual metrics from closed positions (top_wallet_performance table)
@@ -243,7 +245,7 @@ export class SyncService {
         amount: performanceMetrics.best_trade,
         timestamp: latestStats.as_of_ts,
       };
-      worstPerf = {
+      worstTrade = {
         amount: performanceMetrics.worst_trade,
         timestamp: latestStats.as_of_ts,
       };
@@ -255,7 +257,7 @@ export class SyncService {
       avgWin = estimates.avgWin;
       avgLoss = estimates.avgLoss;
       bestTrade = estimates.bestTrade;
-      worstPerf = estimates.worstPerf;
+      worstTrade = estimates.worstPerf;
 
       // Calculate profit factor from estimates
       const totalProfits = numWins * avgWin;
@@ -287,10 +289,12 @@ export class SyncService {
       avg_loss: avgLoss,
       best_trade_amount: bestTrade.amount,
       best_trade_time_ago: bestTrade.timestamp,
-      best_perf_amount: bestTrade.amount, // Same as best trade for now
+      worst_trade_amount: worstTrade.amount,
+      worst_trade_time_ago: worstTrade.timestamp,
+      best_perf_amount: bestTrade.amount,
       best_perf_time_ago: bestTrade.timestamp,
-      worst_perf_amount: worstPerf.amount,
-      worst_perf_time_ago: worstPerf.timestamp,
+      worst_perf_amount: worstTrade.amount,
+      worst_perf_time_ago: worstTrade.timestamp,
       num_wins: numWins,
       num_losses: numLosses,
       avg_trade_size: avgTradeSize,

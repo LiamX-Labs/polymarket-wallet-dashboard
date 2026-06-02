@@ -127,12 +127,12 @@ class WalletProfiler:
             results.append(stat)
         return results
 
-    def get_all_positions_7d(self, wallet: str) -> list[dict]:
+    def get_all_positions_lookback(self, wallet: str, days: int = 7) -> list[dict]:
         """
-        Fetch ALL closed positions (all markets) for a wallet in the last 7 days.
+        Fetch ALL closed positions (all markets) for a wallet in the last X days.
         Returns list of position dictionaries from Polymarket API.
         """
-        cutoff = int((datetime.utcnow() - timedelta(days=7)).timestamp())
+        cutoff = int((datetime.utcnow() - timedelta(days=days)).timestamp())
         return self.fetcher.get_all_closed_positions(wallet, cutoff_timestamp=cutoff)
 
     def calculate_pnl_metrics(self, positions: list[dict]) -> dict:
@@ -154,6 +154,7 @@ class WalletProfiler:
                 - worst_trade_timestamp: timestamp of worst trade
                 - total_positions: total count of closed positions
                 - avg_return_per_trade: average ROI per trade (percentage)
+                - avg_trade_size: average dollar amount committed per trade
         """
         if not positions:
             return {
@@ -170,22 +171,26 @@ class WalletProfiler:
                 "worst_trade_timestamp": None,
                 "total_positions": 0,
                 "avg_return_per_trade": 0.0,
+                "avg_trade_size": 0.0,
             }
 
         # Create list of (pnl, timestamp) tuples
         pnl_data = [(float(p.get("realizedPnl", 0) or 0), int(p.get("timestamp", 0) or 0)) for p in positions]
 
-        # Calculate individual returns for average return per trade
+        # Calculate individual returns and total capital for metrics
         individual_returns = []
+        total_capital = 0.0
         for p in positions:
             pnl = float(p.get("realizedPnl", 0) or 0)
             avg_price = float(p.get("avgPrice", 0) or 0)
             total_bought = float(p.get("totalBought", 0) or 0)
             capital = avg_price * total_bought
+            total_capital += capital
             if capital > 0:
                 individual_returns.append(pnl / capital)
 
         avg_return_per_trade = (sum(individual_returns) / len(individual_returns) * 100.0) if individual_returns else 0.0
+        avg_trade_size = (total_capital / len(positions)) if positions else 0.0
 
         winning_positions = [(pnl, ts) for pnl, ts in pnl_data if pnl > 0]
         losing_positions = [(pnl, ts) for pnl, ts in pnl_data if pnl < 0]
@@ -222,6 +227,7 @@ class WalletProfiler:
             "worst_trade_timestamp": worst_trade_data[1],
             "total_positions": len(positions),
             "avg_return_per_trade": avg_return_per_trade,
+            "avg_trade_size": avg_trade_size,
         }
 
     def calculate_avg_time_between_closed_positions(self, positions: list[dict]) -> int:

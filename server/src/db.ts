@@ -25,7 +25,7 @@ export class DashboardDB {
         avg_time_between_positions INTEGER DEFAULT 0,
         last_position_timestamp INTEGER,
 
-        -- Track Record metrics (7-day window)
+        -- Track Record metrics (lookback window)
         win_rate REAL DEFAULT 0,
         total_trades INTEGER DEFAULT 0,
         avg_trades_per_day REAL DEFAULT 0,
@@ -34,6 +34,8 @@ export class DashboardDB {
         avg_loss REAL DEFAULT 0,
         best_trade_amount REAL DEFAULT 0,
         best_trade_time_ago INTEGER,
+        worst_trade_amount REAL DEFAULT 0,
+        worst_trade_time_ago INTEGER,
         best_perf_amount REAL DEFAULT 0,
         best_perf_time_ago INTEGER,
         worst_perf_amount REAL DEFAULT 0,
@@ -60,12 +62,13 @@ export class DashboardDB {
         recent_trade_timestamp, recent_trade_pnl, avg_time_between_positions,
         last_position_timestamp, win_rate, total_trades, avg_trades_per_day,
         avg_hold_time_seconds, avg_win, avg_loss, best_trade_amount,
-        best_trade_time_ago, best_perf_amount, best_perf_time_ago,
+        best_trade_time_ago, worst_trade_amount, worst_trade_time_ago,
+        best_perf_amount, best_perf_time_ago,
         worst_perf_amount, worst_perf_time_ago, num_wins, num_losses, avg_trade_size,
         profit_factor, last_updated
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
       ON CONFLICT(wallet) DO UPDATE SET
         profit_24h = excluded.profit_24h,
@@ -83,6 +86,8 @@ export class DashboardDB {
         avg_loss = excluded.avg_loss,
         best_trade_amount = excluded.best_trade_amount,
         best_trade_time_ago = excluded.best_trade_time_ago,
+        worst_trade_amount = excluded.worst_trade_amount,
+        worst_trade_time_ago = excluded.worst_trade_time_ago,
         best_perf_amount = excluded.best_perf_amount,
         best_perf_time_ago = excluded.best_perf_time_ago,
         worst_perf_amount = excluded.worst_perf_amount,
@@ -111,6 +116,8 @@ export class DashboardDB {
       stats.avg_loss,
       stats.best_trade_amount,
       stats.best_trade_time_ago,
+      stats.worst_trade_amount,
+      stats.worst_trade_time_ago,
       stats.best_perf_amount,
       stats.best_perf_time_ago,
       stats.worst_perf_amount,

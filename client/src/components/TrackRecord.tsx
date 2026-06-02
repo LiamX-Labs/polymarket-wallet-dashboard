@@ -59,7 +59,7 @@ export function TrackRecord({ wallet }: TrackRecordProps) {
 
       {/* Avg $ loss */}
       <div className="flex flex-col w-[60px]">
-        <div className="font-semibold text-accent-red text-center">{formatCurrency(wallet.avg_loss)}</div>
+        <div className="font-semibold text-accent-red text-center">{formatCurrency(wallet.avg_win)}</div>
       </div>
 
       {/* Best Trade $ / time ago */}
@@ -70,18 +70,18 @@ export function TrackRecord({ wallet }: TrackRecordProps) {
         <div className="text-gray-400 text-[11px] text-center">{formatTimeAgo(wallet.best_trade_time_ago)}</div>
       </div>
 
-      {/* Best Perf $ / time ago */}
+      {/* Worst Trade $ / time ago */}
+      <div className="flex flex-col w-[70px]">
+        <div className="font-semibold text-accent-red text-center">
+          {formatCurrency(wallet.worst_trade_amount)}
+        </div>
+        <div className="text-gray-400 text-[11px] text-center">{formatTimeAgo(wallet.worst_trade_time_ago)}</div>
+      </div>
+
+      {/* Best Perf $ / # wins */}
       <div className="flex flex-col w-[70px]">
         <div className="font-semibold text-accent-green text-center">
           {formatCurrency(wallet.best_perf_amount)}
-        </div>
-        <div className="text-gray-400 text-[11px] text-center">{formatTimeAgo(wallet.best_perf_time_ago)}</div>
-      </div>
-
-      {/* Worst Perf $ / # wins */}
-      <div className="flex flex-col w-[70px]">
-        <div className="font-semibold text-accent-red text-center">
-          {formatCurrency(wallet.worst_perf_amount)}
         </div>
         <div className="text-gray-400 text-[11px] text-center">{wallet.num_wins} wins</div>
       </div>
@@ -91,7 +91,7 @@ export function TrackRecord({ wallet }: TrackRecordProps) {
         <div className="font-semibold text-accent-red text-center">
           {formatCurrency(wallet.worst_perf_amount)}
         </div>
-        <div className="text-gray-400 text-[11px] text-center">{wallet.num_losses}</div>
+        <div className="text-gray-400 text-[11px] text-center">{wallet.num_losses} losses</div>
       </div>
 
       {/* Avg $ trade size */}

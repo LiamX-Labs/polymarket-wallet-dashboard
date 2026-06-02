@@ -240,25 +240,25 @@ def truncate_text(text: str, max_length: int = 4000) -> str:
 
 def format_tracker_market_alert(alert: dict) -> str:
     """Format per-market Top 5 tracker alert."""
-    market = alert["market"]
-    top_wallets = alert["top_wallets"]
+    market = alert.get("market", {})
+    top_wallets = alert.get("top_wallets", [])
 
     lines = [
         "<b>🚨 BTC Market Smart Money Alert</b>",
         "",
-        f"<b>Market:</b> {market['title']}",
-        f"<b>Timeframe:</b> {market['timeframe']}",
-        f"<b>Progress:</b> {market['progress_pct']:.1f}%",
+        f"<b>Market:</b> {market.get('title', 'Unknown')}",
+        f"<b>Timeframe:</b> {market.get('timeframe', 'Unknown')}",
+        f"<b>Progress:</b> {market.get('progress_pct', 0.0):.1f}%",
         "",
         f"<b>Top {len(top_wallets)} Wallets (by 7d ROI)</b>",
     ]
 
     for idx, wallet in enumerate(top_wallets, start=1):
         lines.extend([
-            f"{idx}. <code>{wallet['wallet']}</code>",
-            f"   Side: <b>{wallet['side']}</b> @ {wallet['entry_price']:.4f}",
-            f"   7d ROI: <b>{wallet['roi_7d']:.2f}%</b> | Win Rate: <b>{wallet['win_rate_7d']:.1f}%</b>",
-            f"   Copyability: <b>{wallet['copyability_score']:.1f}</b>",
+            f"{idx}. <code>{wallet.get('wallet', 'Unknown')}</code>",
+            f"   Side: <b>{wallet.get('side', 'UNKNOWN')}</b> @ {wallet.get('entry_price', 0.0):.4f}",
+            f"   7d ROI: <b>{wallet.get('roi_7d', 0.0):.2f}%</b> | Win Rate: <b>{wallet.get('win_rate_7d', 0.0):.1f}%</b>",
+            f"   Copyability: <b>{wallet.get('copyability_score', 0.0):.1f}</b>",
         ])
 
     return "\n".join(lines)
@@ -269,16 +269,16 @@ def format_tracker_daily_report(report: dict) -> str:
     lines = [
         "<b>📬 Daily Alpha Report (UTC)</b>",
         "",
-        f"<b>Date:</b> {report['date_utc']}",
-        f"<b>Markets Scanned:</b> {report['markets_scanned']}",
+        f"<b>Date:</b> {report.get('date_utc', 'Unknown')}",
+        f"<b>Markets Scanned:</b> {report.get('markets_scanned', 0)}",
         "",
         "<b>Top 10 Wallets</b>",
     ]
 
-    for idx, wallet in enumerate(report["top_wallets"], start=1):
+    for idx, wallet in enumerate(report.get("top_wallets", []), start=1):
         lines.append(
-            f"{idx}. <code>{wallet['wallet']}</code> | ROI30d: {wallet['roi_30d']:.2f}% | "
-            f"Win30d: {wallet['win_rate_30d']:.1f}% | Spec: {wallet['specialization']}"
+            f"{idx}. <code>{wallet.get('wallet', 'Unknown')}</code> | ROI30d: {wallet.get('roi_30d', 0.0):.2f}% | "
+            f"Appearances: {wallet.get('appearances', 0)}"
         )
 
     return "\n".join(lines)

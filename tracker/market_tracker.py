@@ -226,12 +226,12 @@ class BTCMarketTracker:
 
             try:
                 # Reuse positions from pipeline cache if available, else fallback to fetch
-                # Note: pipeline uses 4d lookback, which is sufficient for recent performance
+                # Note: pipeline uses configurable lookback, which is sufficient for recent performance
                 if wallet in wallet_data_cache:
                     positions = wallet_data_cache[wallet]
                 else:
-                    logger.debug("Cache miss for %s, fetching 7d data", wallet[:8])
-                    positions = self.profiler.get_all_positions_7d(wallet)
+                    logger.debug("Cache miss for %s, fetching data", wallet[:8])
+                    positions = self.profiler.get_all_positions_lookback(wallet, days=self.filter_pipeline.lookback_days)
                 
                 wallet_closed_positions[wallet] = positions
 
@@ -292,7 +292,7 @@ class BTCMarketTracker:
                     "value": pick["value"],
                     "rank_score": pick["rank_score"],
                     "copyability_score": pick["copyability_score"],
-                    # Performance metrics (from 4-day history used in pipeline)
+                    # Performance metrics (from history used in pipeline)
                     "total_profits": metrics["total_profits"],
                     "total_losses": metrics["total_losses"],
                     "profit_factor": metrics["profit_factor"],
@@ -305,6 +305,7 @@ class BTCMarketTracker:
                     "best_trade_timestamp": metrics["best_trade_timestamp"],
                     "worst_trade_timestamp": metrics["worst_trade_timestamp"],
                     "total_positions": metrics["total_positions"],
+                    "avg_trade_size": metrics["avg_trade_size"],
                     # Pipeline metrics
                     "roi_4d": pick.get("roi_4d", 0.0),
                     "win_rate_4d": pick.get("win_rate_4d", 0.0),
@@ -335,6 +336,7 @@ class BTCMarketTracker:
                     "best_trade_timestamp": None,
                     "worst_trade_timestamp": None,
                     "total_positions": 0,
+                    "avg_trade_size": 0.0,
                     "roi_4d": pick.get("roi_4d", 0.0),
                     "win_rate_4d": pick.get("win_rate_4d", 0.0),
                 })
@@ -399,7 +401,7 @@ class BTCMarketTracker:
             win_rate_from_closed = (perf["num_wins"] / total_closed * 100) if total_closed > 0 else 0
 
             # Calculate avg trades per day from closed positions
-            avg_trades_per_day_from_closed = total_closed / 4 if total_closed > 0 else 0  # 4-day lookback
+            avg_trades_per_day_from_closed = total_closed / self.filter_pipeline.lookback_days if total_closed > 0 else 0
 
             dashboard_data = {
                 "wallet": perf["wallet"],
@@ -414,12 +416,12 @@ class BTCMarketTracker:
                 "avg_time_between_positions": avg_time_between,
                 "last_position_timestamp": recent_position["trigger_ts"] if recent_position else None,
 
-                # Track record - from 4-day closed positions
+                # Track record - from history used in pipeline
                 "win_rate": win_rate_from_closed,
                 "total_trades": total_closed,
                 "avg_trades_per_day": avg_trades_per_day_from_closed,
                 "avg_hold_time_seconds": avg_hold_time,
-                "avg_trade_size": 0,  # Would need additional data
+                "avg_trade_size": perf["avg_trade_size"],
 
                 # Performance metrics from closed positions
                 "total_profits": perf["total_profits"],
@@ -451,8 +453,9 @@ class BTCMarketTracker:
                     "wallet": p["wallet"],
                     "side": p["side"],
                     "entry_price": p["entry_price"],
-                    "roi_4d": p.get("roi_4d", 0.0),
-                    "win_rate_4d": p.get("win_rate_4d", 0.0),
+                    "roi_7d": p.get("roi_4d", 0.0),
+                    "win_rate_7d": p.get("win_rate_4d", 0.0),
+                    "copyability_score": p.get("copyability_score", 0.0),
                 }
                 for p in enriched_picks
             ],
@@ -506,4 +509,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

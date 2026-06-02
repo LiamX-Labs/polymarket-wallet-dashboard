@@ -10,7 +10,7 @@ export interface WalletStats {
   avg_time_between_positions: number;
   last_position_timestamp: number | null;
 
-  // Track Record metrics (7-day window)
+  // Track Record metrics (lookback window)
   win_rate: number;
   total_trades: number;
   avg_trades_per_day: number;
@@ -19,6 +19,8 @@ export interface WalletStats {
   avg_loss: number;
   best_trade_amount: number;
   best_trade_time_ago: number | null;
+  worst_trade_amount: number;
+  worst_trade_time_ago: number | null;
   best_perf_amount: number;
   best_perf_time_ago: number | null;
   worst_perf_amount: number;
