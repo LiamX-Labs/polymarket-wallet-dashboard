@@ -83,7 +83,7 @@ export function TrackRecord({ wallet }: TrackRecordProps) {
         <div className="font-semibold text-accent-green text-center">
           {formatCurrency(wallet.best_perf_amount)}
         </div>
-        <div className="text-gray-400 text-[11px] text-center">{wallet.num_wins} wins</div>
+        <div className="text-gray-400 text-[11px] text-center">{wallet.best_perf_count} wins</div>
       </div>
 
       {/* Worst Perf $ / # losses */}
@@ -91,7 +91,7 @@ export function TrackRecord({ wallet }: TrackRecordProps) {
         <div className="font-semibold text-accent-red text-center">
           {formatCurrency(wallet.worst_perf_amount)}
         </div>
-        <div className="text-gray-400 text-[11px] text-center">{wallet.num_losses} losses</div>
+        <div className="text-gray-400 text-[11px] text-center">{wallet.worst_perf_count} losses</div>
       </div>
 
       {/* Avg $ trade size */}

@@ -158,6 +158,10 @@ class TrackerDB:
                 best_trade_time_ago INTEGER,
                 worst_trade_amount REAL NOT NULL DEFAULT 0,
                 worst_trade_time_ago INTEGER,
+                best_perf_amount REAL NOT NULL DEFAULT 0,
+                best_perf_count INTEGER NOT NULL DEFAULT 0,
+                worst_perf_amount REAL NOT NULL DEFAULT 0,
+                worst_perf_count INTEGER NOT NULL DEFAULT 0,
                 avg_trade_size REAL NOT NULL DEFAULT 0,
 
                 -- Metadata
@@ -397,8 +401,9 @@ class TrackerDB:
              avg_hold_time_seconds, total_profits, total_losses, profit_factor,
              num_wins, num_losses, avg_win, avg_loss, best_trade_amount,
              best_trade_time_ago, worst_trade_amount, worst_trade_time_ago,
+             best_perf_amount, best_perf_count, worst_perf_amount, worst_perf_count,
              avg_trade_size, last_updated, scan_event_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 wallet_data["wallet"],
@@ -424,6 +429,10 @@ class TrackerDB:
                 wallet_data.get("best_trade_time_ago"),
                 wallet_data.get("worst_trade_amount", 0),
                 wallet_data.get("worst_trade_time_ago"),
+                wallet_data.get("best_perf_amount", 0),
+                wallet_data.get("best_perf_count", 0),
+                wallet_data.get("worst_perf_amount", 0),
+                wallet_data.get("worst_perf_count", 0),
                 wallet_data.get("avg_trade_size", 0),
                 int(datetime.now(timezone.utc).timestamp()),
                 wallet_data.get("scan_event_id"),

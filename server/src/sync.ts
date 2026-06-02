@@ -161,10 +161,12 @@ export class SyncService {
       best_trade_time_ago: summary.best_trade_time_ago || null,
       worst_trade_amount: summary.worst_trade_amount || 0,
       worst_trade_time_ago: summary.worst_trade_time_ago || null,
-      best_perf_amount: summary.best_trade_amount || 0, // Best Perf $ shows best trade amount
-      best_perf_time_ago: summary.best_trade_time_ago || null,
-      worst_perf_amount: summary.worst_trade_amount || 0, // Worst Perf $ shows worst trade amount
-      worst_perf_time_ago: summary.worst_trade_time_ago || null,
+      best_perf_amount: summary.best_perf_amount || 0,
+      best_perf_time_ago: summary.best_perf_time_ago || null,
+      best_perf_count: summary.best_perf_count || 0,
+      worst_perf_amount: summary.worst_perf_amount || 0,
+      worst_perf_time_ago: summary.worst_perf_time_ago || null,
+      worst_perf_count: summary.worst_perf_count || 0,
       num_wins: summary.num_wins || 0,
       num_losses: summary.num_losses || 0,
       avg_trade_size: summary.avg_trade_size || 0,
@@ -292,8 +294,10 @@ export class SyncService {
       worst_trade_amount: worstTrade.amount,
       worst_trade_time_ago: worstTrade.timestamp,
       best_perf_amount: bestTrade.amount,
+      best_perf_count: 0, // Placeholder as consecutive streak not available in legacy
       best_perf_time_ago: bestTrade.timestamp,
       worst_perf_amount: worstTrade.amount,
+      worst_perf_count: 0, // Placeholder as consecutive streak not available in legacy
       worst_perf_time_ago: worstTrade.timestamp,
       num_wins: numWins,
       num_losses: numLosses,

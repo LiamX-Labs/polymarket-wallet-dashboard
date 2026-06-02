@@ -23,8 +23,10 @@ export interface WalletStats {
   worst_trade_time_ago: number | null;
   best_perf_amount: number;
   best_perf_time_ago: number | null;
+  best_perf_count: number;
   worst_perf_amount: number;
   worst_perf_time_ago: number | null;
+  worst_perf_count: number;
   num_wins: number;
   num_losses: number;
   avg_trade_size: number;
