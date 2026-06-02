@@ -30,10 +30,10 @@ class WalletFilterPipeline:
     DEFAULT_LOOKBACK_DAYS = 4
     DEFAULT_MIN_PROFIT = 1.0
     DEFAULT_MIN_HOLD_TIME_MINUTES = 3
-    DEFAULT_MIN_TRADE_COUNT = 5
-    DEFAULT_MIN_WIN_RATE = 20.0
-    DEFAULT_MIN_AVG_RETURN = 20.0
-    MAX_WORKERS = 3  # Reduced from 10 to avoid 429 rate limits
+    DEFAULT_MIN_TRADE_COUNT = 10
+    DEFAULT_MIN_WIN_RATE = 40.0
+    DEFAULT_MIN_AVG_RETURN = 70.0
+    MAX_WORKERS = 5  # Reduced from 10 to avoid 429 rate limits
 
     def __init__(
         self,
