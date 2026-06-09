@@ -14,9 +14,11 @@ from typing import Iterable, List, Dict, Tuple, Optional
 import concurrent.futures
 
 if __package__ in {None, ""}:
+    from bot.config import LOW_MEMORY_MODE, TRACKER_MAX_WORKERS
     from polymarket_api_fetcher import PolymarketAPIFetcher
     from wallet_profiler import WalletProfiler
 else:
+    from bot.config import LOW_MEMORY_MODE, TRACKER_MAX_WORKERS
     from .polymarket_api_fetcher import PolymarketAPIFetcher
     from .wallet_profiler import WalletProfiler
 
@@ -33,7 +35,7 @@ class WalletFilterPipeline:
     DEFAULT_MIN_TRADE_COUNT = 20
     DEFAULT_MIN_WIN_RATE = 40.0
     DEFAULT_MIN_AVG_RETURN = 100.0
-    MAX_WORKERS = 5  # Reduced from 10 to avoid 429 rate limits
+    MAX_WORKERS = 2 if LOW_MEMORY_MODE else TRACKER_MAX_WORKERS
 
     # PART 3 — Bitcoin wallet discovery qualification thresholds.
     # Both must be satisfied before a wallet is admitted to the tracker universe.

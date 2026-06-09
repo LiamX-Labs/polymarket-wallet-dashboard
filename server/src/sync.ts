@@ -1,21 +1,22 @@
 import Database from 'better-sqlite3';
-import { DashboardDB } from './db';
+import { SqliteDashboardDB } from './db';
+import { SyncServiceLike } from './db-interface';
 import { WalletStats } from './types';
 
-export class SyncService {
+export class SqliteSyncService implements SyncServiceLike {
   private trackerDb: Database.Database;
-  private dashboardDb: DashboardDB;
+  private dashboardDb: SqliteDashboardDB;
   private lastTrackerUpdate: number = 0;
 
   constructor(trackerDbPath: string, dashboardDbPath: string) {
     this.trackerDb = new Database(trackerDbPath, { readonly: true });
-    this.dashboardDb = new DashboardDB(dashboardDbPath);
+    this.dashboardDb = new SqliteDashboardDB(dashboardDbPath);
   }
 
   /**
    * Check if tracker has new data since last sync.
    */
-  getLatestTrackerUpdate(): number {
+  async getLatestTrackerUpdate(): Promise<number> {
     try {
       const result = this.trackerDb
         .prepare(`SELECT MAX(last_updated) as max_update FROM wallet_dashboard_summary`)
@@ -27,8 +28,9 @@ export class SyncService {
     }
   }
 
-  needsSync(): boolean {
-    return this.getLatestTrackerUpdate() > this.lastTrackerUpdate;
+  async needsSync(): Promise<boolean> {
+    const latest = await this.getLatestTrackerUpdate();
+    return latest > this.lastTrackerUpdate;
   }
 
   /**
@@ -44,7 +46,7 @@ export class SyncService {
    * Falls back to the legacy multi-query method (wallet_stats_7d) if the summary
    * table is empty.
    */
-  sync(): void {
+  async sync(): Promise<void> {
     console.log('[SYNC] Starting wallet stats sync...');
     const startTime = Date.now();
 
@@ -94,7 +96,7 @@ export class SyncService {
           : this.getWalletStatsOptimized(wallet);
 
         if (stats) {
-          this.dashboardDb.upsertWalletStats(stats);
+          await this.dashboardDb.upsertWalletStats(stats);
           synced++;
         } else {
           console.warn(`[SYNC] No stats returned for wallet ${wallet}`);
@@ -113,10 +115,10 @@ export class SyncService {
       `Synced ${synced}/${wallets.length} wallets in ${duration}ms`
     );
 
-    this.lastTrackerUpdate = this.getLatestTrackerUpdate();
+    this.lastTrackerUpdate = await this.getLatestTrackerUpdate();
 
     try {
-      const verifyCount = this.dashboardDb.getAllWallets().length;
+      const verifyCount = await this.dashboardDb.getWalletCount();
       console.log(`[SYNC] Dashboard now contains ${verifyCount} wallets`);
     } catch (error) {
       console.error('[SYNC] Failed to verify dashboard database:', error);
@@ -310,8 +312,11 @@ export class SyncService {
       : 300;
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.trackerDb.close();
-    this.dashboardDb.close();
+    await this.dashboardDb.close();
   }
 }
+
+/** @deprecated Use SqliteSyncService or createSyncService() */
+export const SyncService = SqliteSyncService;

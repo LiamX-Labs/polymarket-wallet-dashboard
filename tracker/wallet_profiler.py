@@ -48,6 +48,7 @@ class WalletProfiler:
         # Initialize wallet analyzer for balance lookups (optional - only if API key available)
         self.wallet_analyzer = WalletAnalyzer(api_key=POLYGONSCAN_API_KEY) if POLYGONSCAN_API_KEY else None
         self._balance_cache = {}  # Cache wallet balances to avoid repeated API calls
+        self._balance_cache_limit = 100
 
     def hft_prefilter_4h(self, wallets: Iterable[str]) -> list[dict]:
         """
@@ -455,6 +456,13 @@ class WalletProfiler:
             "hft_flag": self.is_hft_from_positions(positions),
         }
 
+    def _cache_balance(self, wallet: str, bankroll: float) -> float:
+        if len(self._balance_cache) >= self._balance_cache_limit:
+            oldest = next(iter(self._balance_cache))
+            del self._balance_cache[oldest]
+        self._balance_cache[wallet] = bankroll
+        return bankroll
+
     def _get_wallet_bankroll(self, wallet: str) -> float:
         """
         Get wallet's actual bankroll (net deposits) from PolygonScan.
@@ -462,33 +470,23 @@ class WalletProfiler:
         Falls back to estimated bankroll if PolygonScan API is unavailable.
         Uses caching to avoid repeated API calls for the same wallet.
         """
-        # Check cache first
         if wallet in self._balance_cache:
             return self._balance_cache[wallet]
 
-        # Try to fetch real balance if API available
         if self.wallet_analyzer:
             try:
-                # Add 10-second timeout to prevent freezing
                 with timeout(10):
                     analysis = self.wallet_analyzer.analyze_wallet(wallet, days_back=30)
-                    # net_balance = deposits - withdrawals = actual wallet bankroll
                     bankroll = float(analysis.get('net_balance', 0))
-
-                    # Cache the result
-                    self._balance_cache[wallet] = bankroll
-                    return bankroll
+                    return self._cache_balance(wallet, bankroll)
             except TimeoutException:
                 logger.warning("Bankroll fetch timed out for wallet %s, using estimation", wallet[:10])
-                # Cache a timeout marker to avoid retrying this wallet
-                self._balance_cache[wallet] = 0.0
+                return self._cache_balance(wallet, 0.0)
             except Exception as e:
                 logger.debug("Bankroll fetch failed for wallet %s: %s", wallet[:10], str(e))
-                # Cache failure to avoid retrying
-                self._balance_cache[wallet] = 0.0
+                return self._cache_balance(wallet, 0.0)
 
-        # No API key or API failed - will use estimation
-        return 0.0  # Signal to use estimated bankroll
+        return 0.0
 
     @staticmethod
     def _estimate_bankroll(position_data: list[dict]) -> float:

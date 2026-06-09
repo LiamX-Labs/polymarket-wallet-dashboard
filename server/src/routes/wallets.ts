@@ -1,24 +1,18 @@
 import { Router, Request, Response } from 'express';
-import { DashboardDB } from '../db';
+import { DashboardDatabase } from '../db-interface';
 
-export function createWalletsRouter(db: DashboardDB): Router {
+export function createWalletsRouter(db: DashboardDatabase): Router {
   const router = Router();
 
-  /**
-   * GET /api/wallets
-   * Get all wallets with optional sorting and filtering
-   */
-  router.get('/', (req: Request, res: Response) => {
+  router.get('/', async (req: Request, res: Response) => {
     try {
       const sortBy = (req.query.sort as string) || 'profit_24h';
       const order = (req.query.order as 'asc' | 'desc') || 'desc';
       const avgTradeSizeOp = (req.query.avgTradeSizeOp as string) || null;
       const avgTradeSize = req.query.avgTradeSize ? parseFloat(req.query.avgTradeSize as string) : null;
 
-      console.log(`[WALLETS API] Fetching wallets with sort=${sortBy}, order=${order}, avgTradeSizeFilter=${avgTradeSizeOp}${avgTradeSize ? ` ${avgTradeSize}` : ''}`);
-      let wallets = db.getAllWallets(sortBy, order);
-      
-      // Apply average trade size filter if provided
+      let wallets = await db.getAllWallets(sortBy, order);
+
       if (avgTradeSizeOp && avgTradeSize !== null) {
         wallets = wallets.filter(wallet => {
           switch (avgTradeSizeOp) {
@@ -38,8 +32,6 @@ export function createWalletsRouter(db: DashboardDB): Router {
         });
       }
 
-      console.log(`[WALLETS API] Found ${wallets.length} wallets in dashboard database`);
-
       res.json({
         success: true,
         count: wallets.length,
@@ -54,13 +46,9 @@ export function createWalletsRouter(db: DashboardDB): Router {
     }
   });
 
-  /**
-   * GET /api/wallets/:address
-   * Get specific wallet by address
-   */
-  router.get('/:address', (req: Request, res: Response) => {
+  router.get('/:address', async (req: Request, res: Response) => {
     try {
-      const wallet = db.getWalletByAddress(req.params.address);
+      const wallet = await db.getWalletByAddress(req.params.address);
 
       if (!wallet) {
         return res.status(404).json({

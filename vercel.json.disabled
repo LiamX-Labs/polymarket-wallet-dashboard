@@ -1,0 +1,21 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "outputDirectory": "client/dist",
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api"
+    }
+  ],
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 60
+    }
+  },
+  "env": {
+    "NODE_ENV": "production"
+  }
+}

@@ -1,7 +1,8 @@
 import Database from 'better-sqlite3';
+import { DashboardDatabase } from './db-interface';
 import { WalletStats } from './types';
 
-export class DashboardDB {
+export class SqliteDashboardDB implements DashboardDatabase {
   private db: Database.Database;
 
   constructor(dbPath: string) {
@@ -56,13 +57,10 @@ export class DashboardDB {
       CREATE INDEX IF NOT EXISTS idx_avg_trade_size ON wallet_dashboard_stats(avg_trade_size);
     `);
 
-    // Migrate existing databases that were created before best_perf_count /
-    // worst_perf_count columns existed.
     this.addColumnIfMissing('best_perf_count',  'INTEGER DEFAULT 0');
     this.addColumnIfMissing('worst_perf_count', 'INTEGER DEFAULT 0');
   }
 
-  /** Safely add a column to wallet_dashboard_stats if it does not already exist. */
   private addColumnIfMissing(column: string, definition: string): void {
     try {
       const existing = this.db
@@ -79,7 +77,7 @@ export class DashboardDB {
     }
   }
 
-  upsertWalletStats(stats: WalletStats): void {
+  async upsertWalletStats(stats: WalletStats): Promise<void> {
     const stmt = this.db.prepare(`
       INSERT INTO wallet_dashboard_stats (
         wallet, profit_24h, recent_trade_market, recent_trade_side,
@@ -159,7 +157,7 @@ export class DashboardDB {
     );
   }
 
-  getAllWallets(sortBy: string = 'profit_24h', order: 'asc' | 'desc' = 'desc'): WalletStats[] {
+  async getAllWallets(sortBy = 'profit_24h', order: 'asc' | 'desc' = 'desc'): Promise<WalletStats[]> {
     const validColumns = [
       'wallet', 'profit_24h', 'win_rate', 'total_trades', 'avg_trades_per_day',
       'best_trade_amount', 'profit_factor', 'last_updated', 'avg_trade_size',
@@ -177,12 +175,22 @@ export class DashboardDB {
     return stmt.all() as WalletStats[];
   }
 
-  getWalletByAddress(wallet: string): WalletStats | undefined {
+  async getWalletCount(): Promise<number> {
+    const row = this.db
+      .prepare('SELECT COUNT(*) AS count FROM wallet_dashboard_stats')
+      .get() as { count: number };
+    return row?.count ?? 0;
+  }
+
+  async getWalletByAddress(wallet: string): Promise<WalletStats | undefined> {
     const stmt = this.db.prepare('SELECT * FROM wallet_dashboard_stats WHERE wallet = ?');
     return stmt.get(wallet) as WalletStats | undefined;
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.db.close();
   }
 }
+
+/** @deprecated Use SqliteDashboardDB or createDashboardDB() */
+export const DashboardDB = SqliteDashboardDB;

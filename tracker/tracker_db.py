@@ -440,3 +440,12 @@ class TrackerDB:
         )
         self.conn.commit()
 
+        try:
+            from .postgres_sync import maybe_get_postgres_sync
+
+            pg = maybe_get_postgres_sync()
+            if pg is not None:
+                pg.upsert_wallet_dashboard_summary(wallet_data)
+        except Exception as exc:
+            print(f"[TRACKER] PostgreSQL sync failed (SQLite write succeeded): {exc}")
+

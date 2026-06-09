@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import asyncio
+import gc
 import logging
 import os
 import sys
@@ -10,8 +11,10 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from bot.config import (
+    LOW_MEMORY_MODE,
     TRACKER_DATABASE_PATH,
     TRACKER_DAILY_REPORT_HOUR_UTC,
+    TRACKER_MAX_CONCURRENT_ANALYSES,
     TRACKER_POLL_INTERVAL_SECONDS,
     TRACKER_TRIGGER_TOLERANCE_SECONDS,
     validate_config,
@@ -58,8 +61,9 @@ class BTCMarketTracker:
         self._processed_triggers = set()  # (market_id, trigger_ts) deduplication
         self._trigger_lock = asyncio.Lock()
         self._worker_tasks = []  # Track worker tasks
-        self._max_concurrent_analyses = 2  # Maximum 2 simultaneous analyses
-        self._analysis_semaphore = asyncio.Semaphore(2)  # Limit concurrent analyses
+        self._max_concurrent_analyses = max(1, TRACKER_MAX_CONCURRENT_ANALYSES)
+        self._analysis_semaphore = asyncio.Semaphore(self._max_concurrent_analyses)
+        self._processed_trigger_limit = 200 if LOW_MEMORY_MODE else 1000
 
     async def run_forever(self) -> None:
         logger.info(
@@ -146,6 +150,10 @@ class BTCMarketTracker:
                 if trigger_key in self._processed_triggers:
                     continue
                 self._processed_triggers.add(trigger_key)
+                if len(self._processed_triggers) > self._processed_trigger_limit:
+                    overflow = len(self._processed_triggers) - self._processed_trigger_limit
+                    for _ in range(overflow):
+                        self._processed_triggers.pop()
 
             # Queue the trigger for async processing
             await self._trigger_queue.put((market, trigger_ts, progress_pct))
@@ -165,8 +173,7 @@ class BTCMarketTracker:
         market_identifier = market.numeric_id if market.numeric_id else market.market_id
 
         # Step 1: Get initial candidate wallets from market positions
-        # Limit to top 20 for faster pipeline processing (was 50)
-        pnl_limit = 50
+        pnl_limit = 20 if LOW_MEMORY_MODE else 50
         pnl_rankings = self.clob.get_market_pnl_rankings(market_identifier, limit=pnl_limit)
 
         if not pnl_rankings:
@@ -206,8 +213,9 @@ class BTCMarketTracker:
             self.db.create_scan_event(market.market_id, trigger_ts, progress_pct)
             return
 
-        # Step 3: Take top 5 qualified wallets for detailed processing
-        top_5 = top_wallets[:10]
+        # Step 3: Take top qualified wallets for detailed processing
+        top_n = 5 if LOW_MEMORY_MODE else 10
+        top_5 = top_wallets[:top_n]
         logger.info(
             "Final qualified wallets | total_qualified=%s top_5=%s",
             len(top_wallets),
@@ -476,6 +484,11 @@ class BTCMarketTracker:
             ],
         }
         await self.notifier.send_market_alert(alert_payload)
+
+        wallet_data_cache.clear()
+        wallet_closed_positions.clear()
+        if LOW_MEMORY_MODE:
+            gc.collect()
 
     async def maybe_send_daily_report(self) -> None:
         now = datetime.now(timezone.utc)

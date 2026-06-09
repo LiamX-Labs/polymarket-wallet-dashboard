@@ -3,8 +3,9 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
-import { DashboardDB } from './db';
-import { SyncService } from './sync';
+import { usePostgres, isVercelEnabled, getSyncIntervalMs, isLowMemoryMode, isRender } from './config';
+import { createDashboardDB, createSyncService } from './db-factory';
+import { DashboardDatabase, SyncServiceLike } from './db-interface';
 import { createWalletsRouter } from './routes/wallets';
 
 dotenv.config();
@@ -12,44 +13,82 @@ dotenv.config();
 const PORT = process.env.PORT || 3001;
 const TRACKER_DB_PATH = process.env.TRACKER_DB_PATH || path.join(__dirname, '../../data/tracker.sqlite3');
 const DASHBOARD_DB_PATH = process.env.DASHBOARD_DB_PATH || path.join(__dirname, '../../data/dashboard.db');
-// Check for tracker updates every 30 seconds
-const SYNC_INTERVAL_MS = parseInt(process.env.SYNC_INTERVAL_MS || '30000', 10);
+const SYNC_INTERVAL_MS = getSyncIntervalMs();
 
 const app = express();
 
-// Middleware - Configure CORS to allow frontend access
 const corsOptions = {
   origin: process.env.CORS_ORIGIN || '*',
   credentials: true,
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 200,
 };
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// Serve static files from client build
 const clientDistPath = path.join(__dirname, '../../client/dist');
-if (fs.existsSync(clientDistPath)) {
+if (!isRender() && fs.existsSync(clientDistPath)) {
   app.use(express.static(clientDistPath));
   console.log(`[SERVER] Serving static files from ${clientDistPath}`);
-} else {
-  console.warn(`[SERVER] Client dist directory not found at ${clientDistPath}`);
 }
 
-// Ensure dashboard database directory exists
-const dashboardDbDir = path.dirname(DASHBOARD_DB_PATH);
-if (!fs.existsSync(dashboardDbDir)) {
-  fs.mkdirSync(dashboardDbDir, { recursive: true });
-  console.log(`[SERVER] Created dashboard database directory: ${dashboardDbDir}`);
+let dashboardDb: DashboardDatabase | null = null;
+let syncService: SyncServiceLike | null = null;
+const initPromise = initializeApp();
+let lastSyncTime: Date | null = null;
+let lastSyncWalletCount = 0;
+let syncInterval: NodeJS.Timeout | undefined;
+
+async function initializeApp(): Promise<void> {
+  if (dashboardDb) return;
+
+  if (!usePostgres()) {
+    const dashboardDbDir = path.dirname(DASHBOARD_DB_PATH);
+    if (!fs.existsSync(dashboardDbDir)) {
+      fs.mkdirSync(dashboardDbDir, { recursive: true });
+      console.log(`[SERVER] Created dashboard database directory: ${dashboardDbDir}`);
+    }
+  }
+
+  dashboardDb = await createDashboardDB(DASHBOARD_DB_PATH);
+
+  if (!usePostgres()) {
+    await waitForTrackerDb();
+  }
+
+  syncService = await createSyncService(TRACKER_DB_PATH, dashboardDb, DASHBOARD_DB_PATH);
+
+  if (syncService) {
+    console.log(`[SERVER] Sync service initialized (${usePostgres() ? 'PostgreSQL' : 'SQLite'})`);
+    if (!isVercelEnabled()) {
+      await startAutoSync();
+    }
+  } else {
+    console.warn('[SERVER] Sync service not available');
+  }
+
+  app.use('/api/wallets', createWalletsRouter(dashboardDb));
+
+  app.use((req, res) => {
+    res.status(404).json({
+      success: false,
+      error: `Route ${req.method} ${req.originalUrl} not found`,
+      availableEndpoints: [
+        'GET /',
+        'GET /api/health',
+        'GET /api/wallets',
+        'GET /api/wallets/:address',
+        'POST /api/sync',
+      ],
+    });
+  });
 }
 
-// Wait for tracker database to be created by the tracker
-async function waitForTrackerDb(maxWaitSeconds = 60) {
+async function waitForTrackerDb(maxWaitSeconds = 60): Promise<void> {
   const startTime = Date.now();
   while (!fs.existsSync(TRACKER_DB_PATH)) {
     const elapsed = (Date.now() - startTime) / 1000;
     if (elapsed > maxWaitSeconds) {
       console.warn(`[SERVER] Tracker database not found after ${maxWaitSeconds}s: ${TRACKER_DB_PATH}`);
-      console.warn(`[SERVER] Server will start anyway. Sync will fail until tracker creates the database.`);
       break;
     }
     console.log(`[SERVER] Waiting for tracker database... (${elapsed.toFixed(0)}s)`);
@@ -60,73 +99,74 @@ async function waitForTrackerDb(maxWaitSeconds = 60) {
   }
 }
 
-// Initialize databases
-// NOTE: Tracker DB is opened READ-ONLY, Dashboard DB is a SEPARATE database
-const dashboardDb = new DashboardDB(DASHBOARD_DB_PATH);
-let syncService: SyncService | null = null;
-
-// Routes
-app.use('/api/wallets', createWalletsRouter(dashboardDb));
-
-// SPA fallback - serve index.html for any non-API routes
-app.get(/^\/(?!api\/)/, (req, res) => {
-  const indexPath = path.join(__dirname, '../../client/dist/index.html');
-  if (fs.existsSync(indexPath)) {
-    res.sendFile(indexPath);
-  } else {
-    res.status(404).json({
-      success: false,
-      error: 'Client build not found. Please run `cd client && npm run build`',
-    });
+app.use(async (req, res, next) => {
+  try {
+    await initPromise;
+    next();
+  } catch (error) {
+    console.error('[SERVER] Initialization failed:', error);
+    res.status(503).json({ success: false, error: 'Server is initializing' });
   }
 });
 
-// Root endpoint
+if (!isRender()) {
+  app.get(/^\/(?!api\/)/, (req, res) => {
+    const indexPath = path.join(__dirname, '../../client/dist/index.html');
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(404).json({
+        success: false,
+        error: 'Client build not found. Please run `cd client && npm run build`',
+      });
+    }
+  });
+}
+
 app.get('/', (req, res) => {
   res.json({
     name: 'Polymarket Wallet Dashboard API',
     version: '1.0.0',
     status: 'running',
+    database: usePostgres() ? 'postgresql' : 'sqlite',
     endpoints: [
       'GET /api/health',
       'GET /api/wallets',
       'GET /api/wallets/:address',
-      'POST /api/sync'
-    ]
+      'POST /api/sync',
+    ],
   });
 });
 
-// Health check
 app.get('/api/health', (req, res) => {
   res.json({
     success: true,
     status: 'ok',
+    database: usePostgres() ? 'postgresql' : 'sqlite',
     timestamp: new Date().toISOString(),
   });
 });
 
-// Track last sync time
-let lastSyncTime: Date | null = null;
-let lastSyncWalletCount = 0;
+app.get('/api/debug', async (req, res) => {
+  const trackerDbExists = usePostgres() ? true : fs.existsSync(TRACKER_DB_PATH);
+  const dashboardDbExists = usePostgres() ? true : fs.existsSync(DASHBOARD_DB_PATH);
+  const currentWalletCount = dashboardDb
+    ? await dashboardDb.getWalletCount()
+    : 0;
 
-// Debug endpoint to check sync status
-app.get('/api/debug', (req, res) => {
-  const trackerDbExists = fs.existsSync(TRACKER_DB_PATH);
-  const dashboardDbExists = fs.existsSync(DASHBOARD_DB_PATH);
-  const currentWalletCount = dashboardDb.getAllWallets().length;
-
-  let trackerLatestUpdate = null;
+  let trackerLatestUpdate: number | null = null;
   let needsSync = false;
   if (syncService) {
-    trackerLatestUpdate = syncService.getLatestTrackerUpdate();
-    needsSync = syncService.needsSync();
+    trackerLatestUpdate = await syncService.getLatestTrackerUpdate();
+    needsSync = await syncService.needsSync();
   }
 
   res.json({
     success: true,
-    trackerDbPath: TRACKER_DB_PATH,
+    database: usePostgres() ? 'postgresql' : 'sqlite',
+    trackerDbPath: usePostgres() ? 'postgresql:wallet_dashboard_summary' : TRACKER_DB_PATH,
     trackerDbExists,
-    dashboardDbPath: DASHBOARD_DB_PATH,
+    dashboardDbPath: usePostgres() ? 'postgresql:wallet_dashboard_stats' : DASHBOARD_DB_PATH,
     dashboardDbExists,
     syncServiceInitialized: syncService !== null,
     lastSyncTime: lastSyncTime?.toISOString() || 'Never',
@@ -134,26 +174,28 @@ app.get('/api/debug', (req, res) => {
     currentWalletCount,
     syncStrategy: 'Smart polling - only syncs when tracker has new data',
     syncCheckIntervalMs: SYNC_INTERVAL_MS,
-    syncCheckIntervalSeconds: SYNC_INTERVAL_MS / 1000,
-    trackerLatestUpdate: trackerLatestUpdate ? new Date(trackerLatestUpdate * 1000).toISOString() : null,
+    trackerLatestUpdate: trackerLatestUpdate
+      ? new Date(trackerLatestUpdate * 1000).toISOString()
+      : null,
     needsSync,
     timestamp: new Date().toISOString(),
   });
 });
 
-// Manual sync endpoint
-app.post('/api/sync', (req, res) => {
+app.post('/api/sync', async (req, res) => {
   if (!syncService) {
     res.status(503).json({
       success: false,
-      error: 'Sync service not initialized - tracker database not available yet',
+      error: 'Sync service not initialized',
     });
     return;
   }
   try {
-    syncService.sync();
+    await syncService.sync();
     lastSyncTime = new Date();
-    lastSyncWalletCount = dashboardDb.getAllWallets().length;
+    lastSyncWalletCount = dashboardDb
+      ? await dashboardDb.getWalletCount()
+      : 0;
     res.json({
       success: true,
       message: 'Sync completed successfully',
@@ -168,54 +210,33 @@ app.post('/api/sync', (req, res) => {
   }
 });
 
-// Catch-all 404 handler - MUST come after all valid routes
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: `Route ${req.method} ${req.originalUrl} not found`,
-    availableEndpoints: [
-      'GET /',
-      'GET /api/health',
-      'GET /api/wallets',
-      'GET /api/wallets/:address',
-      'POST /api/sync'
-    ]
-  });
-});
-
-// Auto-sync every 5 minutes
-let syncInterval: NodeJS.Timeout;
-
-async function startAutoSync() {
-  if (!syncService) {
-    console.warn('[SERVER] Cannot start auto-sync: sync service not initialized');
-    return;
-  }
+async function startAutoSync(): Promise<void> {
+  if (!syncService) return;
 
   console.log(`[SERVER] Starting auto-sync every ${SYNC_INTERVAL_MS / 1000}s`);
 
-  // Initial sync with retry logic for empty database
   let initialSyncAttempts = 0;
   const maxInitialAttempts = 3;
 
-  async function attemptInitialSync() {
+  async function attemptInitialSync(): Promise<void> {
     try {
       initialSyncAttempts++;
       console.log(`[SERVER] Attempting initial sync (attempt ${initialSyncAttempts}/${maxInitialAttempts})...`);
 
       if (syncService) {
-        syncService.sync();
+        await syncService.sync();
         lastSyncTime = new Date();
 
-        // Check if sync was successful by verifying dashboard has data
-        const walletCount = dashboardDb.getAllWallets().length;
+        const walletCount = dashboardDb
+          ? await dashboardDb.getWalletCount()
+          : 0;
         lastSyncWalletCount = walletCount;
 
         if (walletCount === 0 && initialSyncAttempts < maxInitialAttempts) {
-          console.warn(`[SERVER] Initial sync returned 0 wallets. Tracker may still be initializing. Retrying in 30s...`);
+          console.warn('[SERVER] Initial sync returned 0 wallets. Retrying in 30s...');
           setTimeout(attemptInitialSync, 30000);
         } else if (walletCount === 0) {
-          console.warn(`[SERVER] Initial sync still returns 0 wallets after ${maxInitialAttempts} attempts. Will continue with periodic sync.`);
+          console.warn(`[SERVER] Initial sync still returns 0 wallets after ${maxInitialAttempts} attempts.`);
         } else {
           console.log(`[SERVER] Initial sync successful! Dashboard has ${walletCount} wallets.`);
         }
@@ -223,7 +244,6 @@ async function startAutoSync() {
     } catch (error) {
       console.error('[SERVER] Initial sync failed:', error);
       if (initialSyncAttempts < maxInitialAttempts) {
-        console.log(`[SERVER] Retrying in 30s...`);
         setTimeout(attemptInitialSync, 30000);
       }
     }
@@ -231,66 +251,50 @@ async function startAutoSync() {
 
   await attemptInitialSync();
 
-  // Schedule smart polling - only sync when tracker has new data
-  syncInterval = setInterval(() => {
-    if (syncService) {
-      try {
-        // Check if tracker has new data
-        if (syncService.needsSync()) {
-          console.log('[SERVER] Tracker has new data. Running sync...');
-          syncService.sync();
-          lastSyncTime = new Date();
-          lastSyncWalletCount = dashboardDb.getAllWallets().length;
+  syncInterval = setInterval(async () => {
+    if (!syncService) return;
+    try {
+      if (await syncService.needsSync()) {
+        console.log('[SERVER] Tracker has new data. Running sync...');
+        await syncService.sync();
+        lastSyncTime = new Date();
+        lastSyncWalletCount = dashboardDb
+          ? await dashboardDb.getWalletCount()
+          : 0;
+        if (!isLowMemoryMode()) {
           console.log(`[SERVER] Sync complete. Dashboard has ${lastSyncWalletCount} wallets.`);
-        } else {
-          console.log(`[SERVER] No new tracker data. Skipping sync. (Checking again in ${SYNC_INTERVAL_MS / 1000}s)`);
         }
-      } catch (error) {
-        console.error('[SERVER] Scheduled sync check failed:', error);
       }
+    } catch (error) {
+      console.error('[SERVER] Scheduled sync check failed:', error);
     }
   }, SYNC_INTERVAL_MS);
-
-  console.log(`[SERVER] Smart sync polling started. Checking for tracker updates every ${SYNC_INTERVAL_MS / 1000}s`);
 }
 
-// Start server
-app.listen(PORT, async () => {
-  console.log(`[SERVER] Running on http://localhost:${PORT}`);
-  console.log(`[SERVER] ========================================`);
-  console.log(`[SERVER] Tracker DB (READ-ONLY):   ${TRACKER_DB_PATH}`);
-  console.log(`[SERVER] Dashboard DB (SEPARATE):  ${DASHBOARD_DB_PATH}`);
-  console.log(`[SERVER] ========================================`);
-  console.log(`[SERVER] NOTE: Dashboard uses its own separate database.`);
-  console.log(`[SERVER]       Tracker database is never modified (read-only).`);
-  console.log(`[SERVER] ========================================`);
+export default app;
 
-  // Wait for tracker database then initialize sync service
-  await waitForTrackerDb();
+if (!isVercelEnabled()) {
+  initPromise.then(() => {
+    app.listen(PORT, () => {
+      console.log(`[SERVER] Running on http://localhost:${PORT}`);
+      console.log(`[SERVER] Database mode: ${usePostgres() ? 'PostgreSQL' : 'SQLite'}`);
+      if (!usePostgres()) {
+        console.log(`[SERVER] Tracker DB (READ-ONLY):   ${TRACKER_DB_PATH}`);
+        console.log(`[SERVER] Dashboard DB (SEPARATE):  ${DASHBOARD_DB_PATH}`);
+      }
+    });
+  }).catch((error) => {
+    console.error('[SERVER] Failed to start:', error);
+    process.exit(1);
+  });
+} else {
+  console.log('[SERVER] Running on Vercel - Serverless Mode');
+}
 
-  if (fs.existsSync(TRACKER_DB_PATH)) {
-    try {
-      syncService = new SyncService(TRACKER_DB_PATH, DASHBOARD_DB_PATH);
-      await startAutoSync();
-    } catch (error) {
-      console.error('[SERVER] Failed to initialize sync service:', error);
-      console.warn('[SERVER] Server will continue running but sync is disabled');
-    }
-  } else {
-    console.warn('[SERVER] Tracker database not found. Sync is disabled.');
-    console.warn('[SERVER] The tracker needs to run and create the database first.');
-  }
-});
-
-// Graceful shutdown
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   console.log('\n[SERVER] Shutting down gracefully...');
-  if (syncInterval) {
-    clearInterval(syncInterval);
-  }
-  dashboardDb.close();
-  if (syncService) {
-    syncService.close();
-  }
+  if (syncInterval) clearInterval(syncInterval);
+  if (dashboardDb) await dashboardDb.close();
+  if (syncService) await syncService.close();
   process.exit(0);
 });

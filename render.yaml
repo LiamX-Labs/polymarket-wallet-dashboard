@@ -1,9 +1,20 @@
-# Render Blueprint for Polymarket Wallet Dashboard
-# FREE TIER VERSION - Uses ephemeral storage (data resets on restart)
-# For persistent storage, upgrade to paid tier ($7/month per service with disk)
+# Render Blueprint — Polymarket Wallet Dashboard
+# Optimized for free tier (512 MB RAM) with PostgreSQL persistence.
+#
+# Setup:
+# 1. Create a Postgres database (Render Postgres or free Neon) and set POSTGRES_URL on the API service.
+# 2. Apply this blueprint.
+# 3. Set VITE_API_URL on the static client to your API URL after first deploy.
+
+# Free Postgres (1 GB, expires after 30 days — upgrade or use Neon for long-term)
+databases:
+  - name: polymarket-dashboard-db
+    plan: free
+    databaseName: polymarket_dashboard
+    user: polymarket
 
 services:
-  # Combined Tracker + API Service (to share ephemeral filesystem)
+  # Combined Tracker + API (single container to stay within free tier instance count)
   - type: web
     name: polymarket-dashboard-api
     runtime: node
@@ -14,21 +25,40 @@ services:
       cd server && npm install && npm run build
     startCommand: |
       mkdir -p /tmp &&
-      python3 market_tracker.py &
-      sleep 30 &&
+      MALLOC_ARENA_MAX=2 PYTHONUNBUFFERED=1 LOW_MEMORY_MODE=true python3 market_tracker.py &
+      sleep 20 &&
       cd server && npm start
     envVars:
       - key: PORT
         value: 10000
       - key: NODE_ENV
         value: production
+      - key: RENDER
+        value: "true"
+      - key: LOW_MEMORY_MODE
+        value: "true"
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=192
       - key: CORS_ORIGIN
         value: https://polymarket-dashboard-client.onrender.com
-      # Tracker settings
+      # PostgreSQL — API reads/writes here; tracker mirrors summary rows
+      - key: POSTGRES_URL
+        fromDatabase:
+          name: polymarket-dashboard-db
+          property: connectionString
+      - key: DATABASE_URL
+        fromDatabase:
+          name: polymarket-dashboard-db
+          property: connectionString
+      # Tracker (low-memory defaults)
       - key: TRACKER_POLL_INTERVAL_SECONDS
-        value: 15
+        value: 30
       - key: TRACKER_TRIGGER_TOLERANCE_SECONDS
         value: 20
+      - key: TRACKER_MAX_WORKERS
+        value: 2
+      - key: TRACKER_MAX_CONCURRENT_ANALYSES
+        value: 1
       - key: TRACKER_DATABASE_PATH
         value: /tmp/tracker.sqlite3
       - key: TRACKER_DAILY_REPORT_HOUR_UTC
@@ -39,12 +69,9 @@ services:
         value: https://gamma-api.polymarket.com
       - key: CLOB_API_BASE_URL
         value: https://clob.polymarket.com
-      # API settings
-      - key: TRACKER_DB_PATH
-        value: /tmp/tracker.sqlite3
-      - key: DASHBOARD_DB_PATH
-        value: /tmp/dashboard.db
-      # Optional Telegram (not used in dry run mode)
+      # API sync — poll every 2 min instead of 30s to cut memory/CPU spikes
+      - key: SYNC_INTERVAL_MS
+        value: 120000
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TRACKER_TELEGRAM_CHAT_ID
@@ -58,7 +85,7 @@ services:
     staticPublishPath: ./client/dist
     envVars:
       - key: VITE_API_URL
-        value: https://polymarket-dashboard-api-fkt0.onrender.com
+        value: https://polymarket-dashboard-api.onrender.com
     routes:
       - type: rewrite
         source: /*

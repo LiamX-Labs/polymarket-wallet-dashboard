@@ -22,6 +22,9 @@ POLYGONSCAN_API_KEY = os.getenv('POLYGONSCAN_API_KEY')
 TRACKER_TELEGRAM_CHAT_ID = os.getenv('TRACKER_TELEGRAM_CHAT_ID')
 TRACKER_POLL_INTERVAL_SECONDS = int(os.getenv('TRACKER_POLL_INTERVAL_SECONDS', '15'))
 TRACKER_TRIGGER_TOLERANCE_SECONDS = int(os.getenv('TRACKER_TRIGGER_TOLERANCE_SECONDS', '20'))
+TRACKER_MAX_WORKERS = int(os.getenv('TRACKER_MAX_WORKERS', '5'))
+TRACKER_MAX_CONCURRENT_ANALYSES = int(os.getenv('TRACKER_MAX_CONCURRENT_ANALYSES', '2'))
+LOW_MEMORY_MODE = os.getenv('LOW_MEMORY_MODE', 'false').lower() in {'1', 'true', 'yes'}
 TRACKER_DATABASE_PATH = os.getenv('TRACKER_DATABASE_PATH', 'data/tracker.sqlite3')
 TRACKER_DAILY_REPORT_HOUR_UTC = int(os.getenv('TRACKER_DAILY_REPORT_HOUR_UTC', '23'))
 TRACKER_DRY_RUN = os.getenv('TRACKER_DRY_RUN', 'true').lower() in {'1', 'true', 'yes'}
@@ -62,13 +65,17 @@ def is_user_allowed(user_id: int) -> bool:
 
 def validate_config():
     """Validate that required configuration is present"""
-    if not BOT_TOKEN:
+    if not TRACKER_DRY_RUN and not BOT_TOKEN:
         raise ValueError(
             "TELEGRAM_BOT_TOKEN environment variable not set. "
             "Copy .env.example to .env and add your bot token from @BotFather"
         )
 
     print("✓ Configuration loaded successfully")
+    if LOW_MEMORY_MODE:
+        print("  - Low memory mode enabled")
+    if TRACKER_DRY_RUN:
+        print("  - Tracker dry run enabled (no Telegram alerts)")
     if ALLOWED_USER_IDS:
         print(f"  - User whitelist enabled: {len(ALLOWED_USER_IDS)} allowed users")
     else:
