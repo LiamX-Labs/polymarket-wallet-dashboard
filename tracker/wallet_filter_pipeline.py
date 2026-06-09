@@ -252,7 +252,7 @@ class WalletFilterPipeline:
         return qualified_wallets, wallet_data
 
     def _fetch_all_wallets_parallel(self, wallets: List[str], cutoff_timestamp: int) -> Dict[str, List[Dict]]:
-        """Fetch all wallet data in parallel."""
+        """Fetch all wallet data in parallel, including closed and current positions."""
         wallet_to_positions = {}
         
         logger.info("Fetching data for %d wallets in parallel (max_workers=%d)...", len(wallets), self.MAX_WORKERS)
@@ -260,8 +260,9 @@ class WalletFilterPipeline:
 
         def fetch_one(wallet: str) -> Tuple[str, List[Dict]]:
             try:
-                positions = self.fetcher.get_all_closed_positions(
-                    wallet, cutoff_timestamp=cutoff_timestamp
+                # Use profiler to get combined closed + unredeemed positions
+                positions = self.profiler.get_all_positions_lookback(
+                    wallet, days=self.lookback_days
                 )
                 return wallet, positions
             except Exception as e:

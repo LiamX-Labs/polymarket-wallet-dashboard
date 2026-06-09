@@ -79,6 +79,72 @@ class PolymarketAPIFetcher:
         
         return None
 
+    def get_current_positions(self, wallet_address, limit=50, offset=0):
+        """
+        Fetch current (open/unredeemed) positions for a user
+
+        Args:
+            wallet_address: User's wallet address
+            limit: Results per page (max 50)
+            offset: Pagination offset
+        """
+        endpoint = f"{self.BASE_URL}/positions"
+
+        params = {
+            'user': wallet_address,
+            'limit': min(limit, 50),
+            'offset': offset
+        }
+
+        # Retry logic with exponential backoff for 408/429 errors
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                response = self.session.get(endpoint, params=params, timeout=30)
+                
+                if response.status_code == 200:
+                    return response.json()
+                elif response.status_code in (408, 429):  # Request timeout or rate limit
+                    if attempt < self.MAX_RETRIES - 1:
+                        wait_time = self.RETRY_DELAY_BASE * (2 ** attempt)
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        print(f"Error fetching current positions: {response.status_code}")
+                        return None
+                else:
+                    print(f"Error fetching current positions: {response.status_code}")
+                    return None
+            except requests.exceptions.Timeout:
+                if attempt < self.MAX_RETRIES - 1:
+                    wait_time = self.RETRY_DELAY_BASE * (2 ** attempt)
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"Error fetching current positions: Request timeout")
+                    return None
+        
+        return None
+
+    def get_all_current_positions(self, wallet_address):
+        """Fetch ALL current positions with pagination"""
+        all_positions = []
+        offset = 0
+        limit = 50
+
+        while True:
+            positions = self.get_current_positions(wallet_address, limit=limit, offset=offset)
+            if not positions or len(positions) == 0:
+                break
+            
+            all_positions.extend(positions)
+            if len(positions) < limit:
+                break
+            
+            offset += limit
+            time.sleep(self.REQUEST_DELAY_SECONDS)
+        
+        return all_positions
+
     def get_all_closed_positions(self, wallet_address, cutoff_timestamp=None):
         """
         Fetch ALL closed positions with pagination

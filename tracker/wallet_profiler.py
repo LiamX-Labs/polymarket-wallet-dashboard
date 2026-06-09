@@ -81,10 +81,10 @@ class WalletProfiler:
             wallets: List of wallet addresses to profile
             condition_id: Optional conditionId to filter positions to a specific market
         """
-        cutoff = int((datetime.utcnow() - timedelta(days=7)).timestamp())
         results = []
         for wallet in set(wallets):
-            positions = self.fetcher.get_all_closed_positions(wallet, cutoff_timestamp=cutoff)
+            # Use get_all_positions_lookback to include unredeemed/expired positions
+            positions = self.get_all_positions_lookback(wallet, days=7)
 
             # Filter positions to BTC updown markets only
             # BTC updown market titles contain "Bitcoin" or "BTC"
@@ -102,6 +102,7 @@ class WalletProfiler:
                 btc_positions = [p for p in btc_positions if p.get('conditionId') == condition_id]
 
             # Also fetch trades to get fill counts per position
+            cutoff = int((datetime.utcnow() - timedelta(days=7)).timestamp())
             trades = self.fetcher.get_all_trades(wallet, cutoff_timestamp=cutoff)
             # Filter trades to BTC markets
             btc_trades = [
@@ -117,11 +118,14 @@ class WalletProfiler:
         return results
 
     def profile_30d(self, wallets: Iterable[str]) -> list[dict]:
-        cutoff = int((datetime.utcnow() - timedelta(days=30)).timestamp())
         results = []
         for wallet in set(wallets):
-            positions = self.fetcher.get_all_closed_positions(wallet, cutoff_timestamp=cutoff)
+            # Use get_all_positions_lookback to include unredeemed/expired positions
+            positions = self.get_all_positions_lookback(wallet, days=30)
+            
+            cutoff = int((datetime.utcnow() - timedelta(days=30)).timestamp())
             trades = self.fetcher.get_all_trades(wallet, cutoff_timestamp=cutoff)
+            
             stat = self._compute_stats(wallet, positions, trades)
             stat["specialization"] = self._specialization_from_positions(positions)
             results.append(stat)
@@ -129,11 +133,70 @@ class WalletProfiler:
 
     def get_all_positions_lookback(self, wallet: str, days: int = 7) -> list[dict]:
         """
-        Fetch ALL closed positions (all markets) for a wallet in the last X days.
+        Fetch ALL positions (closed and current/unredeemed) for a wallet in the last X days.
         Returns list of position dictionaries from Polymarket API.
         """
         cutoff = int((datetime.utcnow() - timedelta(days=days)).timestamp())
-        return self.fetcher.get_all_closed_positions(wallet, cutoff_timestamp=cutoff)
+        
+        # 1. Fetch closed positions
+        closed_positions = self.fetcher.get_all_closed_positions(wallet, cutoff_timestamp=cutoff)
+        
+        # 2. Fetch current positions (some might be unredeemed but expired)
+        current_positions = self.fetcher.get_all_current_positions(wallet)
+        
+        # Process current positions to include PnL if they are in expired markets
+        processed_current = []
+        now = datetime.utcnow()
+        
+        # Keep track of conditionId + outcome to avoid duplicates
+        seen_positions = set()
+        for pos in closed_positions:
+            cid = pos.get('conditionId')
+            outcome = pos.get('outcome')
+            if cid and outcome:
+                seen_positions.add(f"{cid}:{outcome}")
+        
+        for pos in current_positions:
+            cid = pos.get('conditionId')
+            outcome = pos.get('outcome')
+            pos_key = f"{cid}:{outcome}" if cid and outcome else None
+            
+            # Skip if we already have this position in closed_positions
+            if pos_key and pos_key in seen_positions:
+                continue
+                
+            end_date_str = pos.get('endDate')
+            is_expired = False
+            if end_date_str:
+                try:
+                    # Handle different ISO formats (some might have 'Z' or '+00:00')
+                    if end_date_str.endswith('Z'):
+                        end_date_str = end_date_str.replace('Z', '+00:00')
+                    end_date = datetime.fromisoformat(end_date_str).replace(tzinfo=None)
+                    if end_date < now:
+                        is_expired = True
+                except ValueError:
+                    pass
+            
+            # If expired, calculate PnL and treat as "closed" for metrics
+            if is_expired:
+                avg_price = float(pos.get('avgPrice', 0) or 0)
+                cur_price = float(pos.get('curPrice', 0) or 0)
+                size = float(pos.get('size', 0) or 0)
+                
+                # Calculate realized PnL for the unredeemed position
+                # (curPrice is 1.0 or 0.0 for resolved markets)
+                pos['realizedPnl'] = (cur_price - avg_price) * size
+                
+                # Use current time as timestamp if not provided
+                if not pos.get('timestamp'):
+                    pos['timestamp'] = int(now.timestamp())
+                
+                processed_current.append(pos)
+                if pos_key:
+                    seen_positions.add(pos_key)
+        
+        return closed_positions + processed_current
 
     def calculate_pnl_metrics(self, positions: list[dict]) -> dict:
         """
