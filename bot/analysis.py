@@ -38,11 +38,11 @@ def run_wallet_analysis(wallet_address: str, days_back: int = None) -> dict:
     fetcher = PolymarketAPIFetcher()
 
     print(f"Fetching data for {wallet_address[:10]}...")
-    positions = fetcher.get_all_closed_positions(wallet_address, cutoff_timestamp)
+    positions = fetcher.get_all_performance_positions(wallet_address, cutoff_timestamp)
     trades = fetcher.get_all_trades(wallet_address, cutoff_timestamp)
 
     if not positions:
-        raise ValueError("No closed positions found for this wallet in the specified timeframe")
+        raise ValueError("No performance positions found for this wallet in the specified timeframe")
 
     # Convert positions to DataFrame
     df = pd.DataFrame(positions)

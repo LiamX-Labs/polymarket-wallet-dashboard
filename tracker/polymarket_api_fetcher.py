@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
 """
 Polymarket API Data Fetcher
-Fetches closed positions and trades directly from Polymarket's Data API
+Fetches closed positions, unredeemed resolved positions, and trades from
+Polymarket's Data API.
+
+Position types (per Polymarket docs):
+  - Active positions: market still open, from GET /positions (redeemable=false)
+  - Unredeemed positions: market resolved but tokens not redeemed yet,
+    from GET /positions?redeemable=true (realizedPnl=0, use cashPnl)
+  - Closed positions: sold out or redeemed, from GET /closed-positions
+
+For accurate performance analytics, combine closed-positions with
+redeemable=true positions. Active/live positions are excluded.
 
 Note: The trades endpoint has a maximum offset of 3000, limiting historical
       trade data to approximately the most recent 4000 trades.
@@ -79,22 +89,84 @@ class PolymarketAPIFetcher:
         
         return None
 
-    def get_current_positions(self, wallet_address, limit=50, offset=0):
+    @staticmethod
+    def position_key(pos: dict) -> str:
+        """Unique key for a position (conditionId + outcome)."""
+        return f"{pos.get('conditionId', '')}:{pos.get('outcome', '')}"
+
+    @staticmethod
+    def parse_end_date_timestamp(end_date_str: str) -> int | None:
+        """Parse Polymarket endDate strings into a unix timestamp."""
+        if not end_date_str:
+            return None
+        try:
+            if 'T' in end_date_str:
+                normalized = end_date_str.replace('Z', '+00:00')
+                return int(datetime.fromisoformat(normalized).timestamp())
+            return int(datetime.fromisoformat(f"{end_date_str}T23:59:59+00:00").timestamp())
+        except ValueError:
+            return None
+
+    @staticmethod
+    def normalize_unredeemed_position(pos: dict) -> dict:
         """
-        Fetch current (open/unredeemed) positions for a user
+        Convert an unredeemed resolved position into closed-position shape.
+
+        Resolved-but-unredeemed positions report realizedPnl=0 until the user
+        redeems on-chain. cashPnl holds the final outcome PnL.
+        """
+        normalized = dict(pos)
+        normalized['realizedPnl'] = float(pos.get('cashPnl', 0) or 0)
+        if not normalized.get('totalBought') and pos.get('size') is not None:
+            normalized['totalBought'] = pos.get('size')
+        if not normalized.get('timestamp'):
+            ts = PolymarketAPIFetcher.parse_end_date_timestamp(pos.get('endDate', ''))
+            if ts:
+                normalized['timestamp'] = ts
+        normalized['redeemable'] = True
+        return normalized
+
+    def get_current_positions(
+        self,
+        wallet_address,
+        limit=50,
+        offset=0,
+        redeemable=None,
+        mergeable=None,
+        sort_by=None,
+        sort_direction=None,
+    ):
+        """
+        Fetch current positions for a user.
+
+        Use redeemable=True to fetch only resolved-but-unredeemed positions.
+        Active (live) positions have redeemable=False and are excluded from
+        performance analytics.
 
         Args:
             wallet_address: User's wallet address
-            limit: Results per page (max 50)
+            limit: Results per page (max 500)
             offset: Pagination offset
+            redeemable: If True, only resolved unredeemed positions
+            mergeable: If True, only mergeable positions
+            sort_by: Sort field (TOKENS, CASHPNL, RESOLVING, etc.)
+            sort_direction: ASC or DESC
         """
         endpoint = f"{self.BASE_URL}/positions"
 
         params = {
             'user': wallet_address,
-            'limit': min(limit, 50),
+            'limit': min(limit, 500),
             'offset': offset
         }
+        if redeemable is not None:
+            params['redeemable'] = redeemable
+        if mergeable is not None:
+            params['mergeable'] = mergeable
+        if sort_by:
+            params['sortBy'] = sort_by
+        if sort_direction:
+            params['sortDirection'] = sort_direction
 
         # Retry logic with exponential backoff for 408/429 errors
         for attempt in range(self.MAX_RETRIES):
@@ -126,24 +198,92 @@ class PolymarketAPIFetcher:
         return None
 
     def get_all_current_positions(self, wallet_address):
-        """Fetch ALL current positions with pagination"""
+        """Fetch ALL current positions (active + unredeemed) with pagination."""
         all_positions = []
         offset = 0
-        limit = 50
+        limit = 500
 
         while True:
             positions = self.get_current_positions(wallet_address, limit=limit, offset=offset)
             if not positions or len(positions) == 0:
                 break
-            
+
             all_positions.extend(positions)
             if len(positions) < limit:
                 break
-            
+
             offset += limit
             time.sleep(self.REQUEST_DELAY_SECONDS)
-        
+
         return all_positions
+
+    def get_all_redeemable_positions(self, wallet_address):
+        """
+        Fetch ALL unredeemed resolved positions (redeemable=true).
+
+        These are markets that have resolved but the user has not yet redeemed
+        their outcome tokens. They are absent from /closed-positions.
+        """
+        all_positions = []
+        offset = 0
+        limit = 500
+
+        print(f"Fetching unredeemed positions from Polymarket API for {wallet_address}...")
+
+        while True:
+            positions = self.get_current_positions(
+                wallet_address,
+                limit=limit,
+                offset=offset,
+                redeemable=True,
+                sort_by="RESOLVING",
+                sort_direction="DESC",
+            )
+            if not positions or len(positions) == 0:
+                break
+
+            all_positions.extend(positions)
+            print(f"  Fetched {len(positions)} unredeemed positions (total: {len(all_positions)})")
+
+            if len(positions) < limit:
+                break
+
+            offset += limit
+            time.sleep(self.REQUEST_DELAY_SECONDS)
+
+        print(f"\nTotal unredeemed positions fetched: {len(all_positions)}\n")
+        return all_positions
+
+    def get_all_performance_positions(self, wallet_address, cutoff_timestamp=None):
+        """
+        Fetch closed positions plus unredeemed resolved positions.
+
+        This is the complete set needed for accurate wallet performance analytics.
+        Active/live positions (market still trading) are excluded.
+        """
+        closed_positions = self.get_all_closed_positions(wallet_address, cutoff_timestamp=cutoff_timestamp)
+        seen_keys = {self.position_key(p) for p in closed_positions if self.position_key(p) != ":"}
+
+        unredeemed_positions = []
+        for pos in self.get_all_redeemable_positions(wallet_address):
+            key = self.position_key(pos)
+            if key in seen_keys:
+                continue
+
+            normalized = self.normalize_unredeemed_position(pos)
+            if cutoff_timestamp and normalized.get('timestamp', 0) < cutoff_timestamp:
+                continue
+
+            unredeemed_positions.append(normalized)
+            seen_keys.add(key)
+
+        if unredeemed_positions:
+            print(
+                f"Including {len(unredeemed_positions)} unredeemed resolved positions "
+                f"for performance analytics"
+            )
+
+        return closed_positions + unredeemed_positions
 
     def get_all_closed_positions(self, wallet_address, cutoff_timestamp=None):
         """
@@ -456,12 +596,14 @@ class PolymarketAPIFetcher:
 
         if positions:
             total_pnl = sum(pos.get('realizedPnl', 0) for pos in positions)
+            unredeemed_count = sum(1 for pos in positions if pos.get('redeemable'))
+            closed_count = len(positions) - unredeemed_count
             winning_positions = [p for p in positions if p.get('realizedPnl', 0) > 0]
             losing_positions = [p for p in positions if p.get('realizedPnl', 0) < 0]
             breakeven_positions = [p for p in positions if p.get('realizedPnl', 0) == 0]
 
-            print(f"\nCLOSED POSITIONS (Complete Data - No API Limits):")
-            print(f"  Total Positions: {len(positions)}")
+            print(f"\nPERFORMANCE POSITIONS (Closed + Unredeemed Resolved):")
+            print(f"  Total Positions: {len(positions)} ({closed_count} closed, {unredeemed_count} unredeemed)")
             print(f"  Winning Positions: {len(winning_positions)}")
             print(f"  Losing Positions: {len(losing_positions)}")
             print(f"  Breakeven Positions: {len(breakeven_positions)}")
@@ -500,8 +642,8 @@ class PolymarketAPIFetcher:
                 print(f"  Total Received from Sells: ${total_sold:.2f}")
 
         print("\n" + "="*80)
-        print("NOTE: For complete analysis, use the closed positions data.")
-        print("      The trades data may be limited by API restrictions.")
+        print("NOTE: Performance uses closed positions plus unredeemed resolved positions.")
+        print("      Active/live positions are excluded. Trades data may be API-limited.")
         print("="*80)
 
 
@@ -538,7 +680,7 @@ def main():
         cutoff_timestamp = None
 
     # Pass cutoff_timestamp to fetch methods for optimized fetching
-    positions = fetcher.get_all_closed_positions(wallet_address, cutoff_timestamp)
+    positions = fetcher.get_all_performance_positions(wallet_address, cutoff_timestamp)
     trades = fetcher.get_all_trades(wallet_address, cutoff_timestamp)
 
     # Export to CSV
