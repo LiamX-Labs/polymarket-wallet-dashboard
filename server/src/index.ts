@@ -251,7 +251,7 @@ async function startAutoSync(): Promise<void> {
 
   await attemptInitialSync();
 
-  syncInterval = setInterval(async () => {
+  async function runSyncLoop(): Promise<void> {
     if (!syncService) return;
     try {
       if (await syncService.needsSync()) {
@@ -267,8 +267,13 @@ async function startAutoSync(): Promise<void> {
       }
     } catch (error) {
       console.error('[SERVER] Scheduled sync check failed:', error);
+    } finally {
+      // Schedule next run after current one finishes
+      syncInterval = setTimeout(runSyncLoop, SYNC_INTERVAL_MS) as any;
     }
-  }, SYNC_INTERVAL_MS);
+  }
+
+  syncInterval = setTimeout(runSyncLoop, SYNC_INTERVAL_MS) as any;
 }
 
 export default app;

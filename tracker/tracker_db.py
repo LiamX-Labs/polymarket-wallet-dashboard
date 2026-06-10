@@ -388,11 +388,19 @@ class TrackerDB:
         self.conn.commit()
 
     def upsert_wallet_dashboard_summary(self, wallet_data: dict[str, Any]) -> None:
+        """Upsert a single wallet summary (convenience wrapper)."""
+        self.upsert_batch_wallet_dashboard_summary([wallet_data])
+
+    def upsert_batch_wallet_dashboard_summary(self, batch_data: Iterable[dict[str, Any]]) -> None:
         """
-        Upsert complete wallet data into unified dashboard summary table.
+        Upsert a batch of wallet data into unified dashboard summary table.
         This is a denormalized table optimized for single-query dashboard retrieval.
+        Supports both local SQLite and optional remote PostgreSQL sync.
         """
-        self.conn.execute(
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        
+        # 1. Update SQLite
+        self.conn.executemany(
             """
             INSERT OR REPLACE INTO wallet_dashboard_summary
             (wallet, profit_24h, recent_trade_market, recent_trade_side,
@@ -405,47 +413,51 @@ class TrackerDB:
              avg_trade_size, last_updated, scan_event_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                wallet_data["wallet"],
-                wallet_data.get("profit_24h", 0),
-                wallet_data.get("recent_trade_market"),
-                wallet_data.get("recent_trade_side"),
-                wallet_data.get("recent_trade_timestamp"),
-                wallet_data.get("recent_trade_pnl"),
-                wallet_data.get("avg_time_between_positions", 0),
-                wallet_data.get("last_position_timestamp"),
-                wallet_data.get("win_rate", 0),
-                wallet_data.get("total_trades", 0),
-                wallet_data.get("avg_trades_per_day", 0),
-                wallet_data.get("avg_hold_time_seconds", 0),
-                wallet_data.get("total_profits", 0),
-                wallet_data.get("total_losses", 0),
-                wallet_data.get("profit_factor", 0),
-                wallet_data.get("num_wins", 0),
-                wallet_data.get("num_losses", 0),
-                wallet_data.get("avg_win", 0),
-                wallet_data.get("avg_loss", 0),
-                wallet_data.get("best_trade_amount", 0),
-                wallet_data.get("best_trade_time_ago"),
-                wallet_data.get("worst_trade_amount", 0),
-                wallet_data.get("worst_trade_time_ago"),
-                wallet_data.get("best_perf_amount", 0),
-                wallet_data.get("best_perf_count", 0),
-                wallet_data.get("worst_perf_amount", 0),
-                wallet_data.get("worst_perf_count", 0),
-                wallet_data.get("avg_trade_size", 0),
-                int(datetime.now(timezone.utc).timestamp()),
-                wallet_data.get("scan_event_id"),
-            ),
+            [
+                (
+                    d["wallet"],
+                    d.get("profit_24h", 0),
+                    d.get("recent_trade_market"),
+                    d.get("recent_trade_side"),
+                    d.get("recent_trade_timestamp"),
+                    d.get("recent_trade_pnl"),
+                    d.get("avg_time_between_positions", 0),
+                    d.get("last_position_timestamp"),
+                    d.get("win_rate", 0),
+                    d.get("total_trades", 0),
+                    d.get("avg_trades_per_day", 0),
+                    d.get("avg_hold_time_seconds", 0),
+                    d.get("total_profits", 0),
+                    d.get("total_losses", 0),
+                    d.get("profit_factor", 0),
+                    d.get("num_wins", 0),
+                    d.get("num_losses", 0),
+                    d.get("avg_win", 0),
+                    d.get("avg_loss", 0),
+                    d.get("best_trade_amount", 0),
+                    d.get("best_trade_time_ago"),
+                    d.get("worst_trade_amount", 0),
+                    d.get("worst_trade_time_ago"),
+                    d.get("best_perf_amount", 0),
+                    d.get("best_perf_count", 0),
+                    d.get("worst_perf_amount", 0),
+                    d.get("worst_perf_count", 0),
+                    d.get("avg_trade_size", 0),
+                    now_ts,
+                    d.get("scan_event_id"),
+                )
+                for d in batch_data
+            ],
         )
         self.conn.commit()
 
+        # 2. Sync to PostgreSQL if configured
         try:
             from .postgres_sync import maybe_get_postgres_sync
 
             pg = maybe_get_postgres_sync()
             if pg is not None:
-                pg.upsert_wallet_dashboard_summary(wallet_data)
+                pg.upsert_batch_wallet_dashboard_summary(batch_data)
         except Exception as exc:
-            print(f"[TRACKER] PostgreSQL sync failed (SQLite write succeeded): {exc}")
+            print(f"[TRACKER] PostgreSQL batch sync failed (SQLite write succeeded): {exc}")
 

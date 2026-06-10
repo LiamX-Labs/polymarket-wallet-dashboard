@@ -391,6 +391,7 @@ class BTCMarketTracker:
         logger.info(f"Saved performance metrics for top {len(top_5_performance)} wallets")
 
         # Update unified dashboard summary table for optimized retrieval
+        batch_dashboard_data = []
         for perf in top_5_performance:
             # Get position history for this wallet (scanner observations)
             positions = self.db.conn.execute(
@@ -459,10 +460,11 @@ class BTCMarketTracker:
                 "worst_perf_amount": perf["worst_perf_amount"],
                 "worst_perf_count": perf["worst_perf_count"],
             }
+            batch_dashboard_data.append(dashboard_data)
 
-            self.db.upsert_wallet_dashboard_summary(dashboard_data)
-
-        logger.info(f"Updated dashboard summary for {len(top_5_performance)} wallets")
+        # Batch update all wallets at once
+        self.db.upsert_batch_wallet_dashboard_summary(batch_dashboard_data)
+        logger.info(f"Updated dashboard summary for {len(batch_dashboard_data)} wallets")
 
         # Send Telegram alert with top 5
         alert_payload = {

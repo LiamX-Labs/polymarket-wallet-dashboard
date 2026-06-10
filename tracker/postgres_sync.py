@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterable
 
 try:
     import psycopg2
-    from psycopg2.extras import RealDictCursor
+    from psycopg2.extras import RealDictCursor, execute_values
 except ImportError:  # pragma: no cover
     psycopg2 = None  # type: ignore
 
@@ -75,93 +75,101 @@ class PostgresSync:
             conn.commit()
 
     def upsert_wallet_dashboard_summary(self, wallet_data: dict[str, Any]) -> None:
+        """Upsert a single wallet summary."""
+        self.upsert_batch_wallet_dashboard_summary([wallet_data])
+
+    def upsert_batch_wallet_dashboard_summary(self, batch_data: Iterable[dict[str, Any]]) -> None:
+        """Upsert a batch of wallet summaries in a single transaction."""
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO wallet_dashboard_summary (
-                        wallet, profit_24h, recent_trade_market, recent_trade_side,
-                        recent_trade_timestamp, recent_trade_pnl, avg_time_between_positions,
-                        last_position_timestamp, win_rate, total_trades, avg_trades_per_day,
-                        avg_hold_time_seconds, total_profits, total_losses, profit_factor,
-                        num_wins, num_losses, avg_win, avg_loss, best_trade_amount,
-                        best_trade_time_ago, worst_trade_amount, worst_trade_time_ago,
-                        best_perf_amount, best_perf_count, worst_perf_amount, worst_perf_count,
-                        avg_trade_size, last_updated, scan_event_id
-                    ) VALUES (
-                        %(wallet)s, %(profit_24h)s, %(recent_trade_market)s, %(recent_trade_side)s,
-                        %(recent_trade_timestamp)s, %(recent_trade_pnl)s, %(avg_time_between_positions)s,
-                        %(last_position_timestamp)s, %(win_rate)s, %(total_trades)s, %(avg_trades_per_day)s,
-                        %(avg_hold_time_seconds)s, %(total_profits)s, %(total_losses)s, %(profit_factor)s,
-                        %(num_wins)s, %(num_losses)s, %(avg_win)s, %(avg_loss)s, %(best_trade_amount)s,
-                        %(best_trade_time_ago)s, %(worst_trade_amount)s, %(worst_trade_time_ago)s,
-                        %(best_perf_amount)s, %(best_perf_count)s, %(worst_perf_amount)s, %(worst_perf_count)s,
-                        %(avg_trade_size)s, %(last_updated)s, %(scan_event_id)s
+                for wallet_data in batch_data:
+                    cur.execute(
+                        """
+                        INSERT INTO wallet_dashboard_summary (
+                            wallet, profit_24h, recent_trade_market, recent_trade_side,
+                            recent_trade_timestamp, recent_trade_pnl, avg_time_between_positions,
+                            last_position_timestamp, win_rate, total_trades, avg_trades_per_day,
+                            avg_hold_time_seconds, total_profits, total_losses, profit_factor,
+                            num_wins, num_losses, avg_win, avg_loss, best_trade_amount,
+                            best_trade_time_ago, worst_trade_amount, worst_trade_time_ago,
+                            best_perf_amount, best_perf_count, worst_perf_amount, worst_perf_count,
+                            avg_trade_size, last_updated, scan_event_id
+                        ) VALUES (
+                            %(wallet)s, %(profit_24h)s, %(recent_trade_market)s, %(recent_trade_side)s,
+                            %(recent_trade_timestamp)s, %(recent_trade_pnl)s, %(avg_time_between_positions)s,
+                            %(last_position_timestamp)s, %(win_rate)s, %(total_trades)s, %(avg_trades_per_day)s,
+                            %(avg_hold_time_seconds)s, %(total_profits)s, %(total_losses)s, %(profit_factor)s,
+                            %(num_wins)s, %(num_losses)s, %(avg_win)s, %(avg_loss)s, %(best_trade_amount)s,
+                            %(best_trade_time_ago)s, %(worst_trade_amount)s, %(worst_trade_time_ago)s,
+                            %(best_perf_amount)s, %(best_perf_count)s, %(worst_perf_amount)s, %(worst_perf_count)s,
+                            %(avg_trade_size)s, %(last_updated)s, %(scan_event_id)s
+                        )
+                        ON CONFLICT (wallet) DO UPDATE SET
+                            profit_24h = EXCLUDED.profit_24h,
+                            recent_trade_market = EXCLUDED.recent_trade_market,
+                            recent_trade_side = EXCLUDED.recent_trade_side,
+                            recent_trade_timestamp = EXCLUDED.recent_trade_timestamp,
+                            recent_trade_pnl = EXCLUDED.recent_trade_pnl,
+                            avg_time_between_positions = EXCLUDED.avg_time_between_positions,
+                            last_position_timestamp = EXCLUDED.last_position_timestamp,
+                            win_rate = EXCLUDED.win_rate,
+                            total_trades = EXCLUDED.total_trades,
+                            avg_trades_per_day = EXCLUDED.avg_trades_per_day,
+                            avg_hold_time_seconds = EXCLUDED.avg_hold_time_seconds,
+                            total_profits = EXCLUDED.total_profits,
+                            total_losses = EXCLUDED.total_losses,
+                            profit_factor = EXCLUDED.profit_factor,
+                            num_wins = EXCLUDED.num_wins,
+                            num_losses = EXCLUDED.num_losses,
+                            avg_win = EXCLUDED.avg_win,
+                            avg_loss = EXCLUDED.avg_loss,
+                            best_trade_amount = EXCLUDED.best_trade_amount,
+                            best_trade_time_ago = EXCLUDED.best_trade_time_ago,
+                            worst_trade_amount = EXCLUDED.worst_trade_amount,
+                            worst_trade_time_ago = EXCLUDED.worst_trade_time_ago,
+                            best_perf_amount = EXCLUDED.best_perf_amount,
+                            best_perf_count = EXCLUDED.best_perf_count,
+                            worst_perf_amount = EXCLUDED.worst_perf_amount,
+                            worst_perf_count = EXCLUDED.worst_perf_count,
+                            avg_trade_size = EXCLUDED.avg_trade_size,
+                            last_updated = EXCLUDED.last_updated,
+                            scan_event_id = EXCLUDED.scan_event_id
+                        """,
+                        {
+                            "wallet": wallet_data["wallet"],
+                            "profit_24h": wallet_data.get("profit_24h", 0),
+                            "recent_trade_market": wallet_data.get("recent_trade_market"),
+                            "recent_trade_side": wallet_data.get("recent_trade_side"),
+                            "recent_trade_timestamp": wallet_data.get("recent_trade_timestamp"),
+                            "recent_trade_pnl": wallet_data.get("recent_trade_pnl"),
+                            "avg_time_between_positions": wallet_data.get("avg_time_between_positions", 0),
+                            "last_position_timestamp": wallet_data.get("last_position_timestamp"),
+                            "win_rate": wallet_data.get("win_rate", 0),
+                            "total_trades": wallet_data.get("total_trades", 0),
+                            "avg_trades_per_day": wallet_data.get("avg_trades_per_day", 0),
+                            "avg_hold_time_seconds": wallet_data.get("avg_hold_time_seconds", 0),
+                            "total_profits": wallet_data.get("total_profits", 0),
+                            "total_losses": wallet_data.get("total_losses", 0),
+                            "profit_factor": wallet_data.get("profit_factor", 0),
+                            "num_wins": wallet_data.get("num_wins", 0),
+                            "num_losses": wallet_data.get("num_losses", 0),
+                            "avg_win": wallet_data.get("avg_win", 0),
+                            "avg_loss": wallet_data.get("avg_loss", 0),
+                            "best_trade_amount": wallet_data.get("best_trade_amount", 0),
+                            "best_trade_time_ago": wallet_data.get("best_trade_time_ago"),
+                            "worst_trade_amount": wallet_data.get("worst_trade_amount", 0),
+                            "worst_trade_time_ago": wallet_data.get("worst_trade_time_ago"),
+                            "best_perf_amount": wallet_data.get("best_perf_amount", 0),
+                            "best_perf_count": wallet_data.get("best_perf_count", 0),
+                            "worst_perf_amount": wallet_data.get("worst_perf_amount", 0),
+                            "worst_perf_count": wallet_data.get("worst_perf_count", 0),
+                            "avg_trade_size": wallet_data.get("avg_trade_size", 0),
+                            "last_updated": now_ts,
+                            "scan_event_id": wallet_data.get("scan_event_id"),
+                        },
                     )
-                    ON CONFLICT (wallet) DO UPDATE SET
-                        profit_24h = EXCLUDED.profit_24h,
-                        recent_trade_market = EXCLUDED.recent_trade_market,
-                        recent_trade_side = EXCLUDED.recent_trade_side,
-                        recent_trade_timestamp = EXCLUDED.recent_trade_timestamp,
-                        recent_trade_pnl = EXCLUDED.recent_trade_pnl,
-                        avg_time_between_positions = EXCLUDED.avg_time_between_positions,
-                        last_position_timestamp = EXCLUDED.last_position_timestamp,
-                        win_rate = EXCLUDED.win_rate,
-                        total_trades = EXCLUDED.total_trades,
-                        avg_trades_per_day = EXCLUDED.avg_trades_per_day,
-                        avg_hold_time_seconds = EXCLUDED.avg_hold_time_seconds,
-                        total_profits = EXCLUDED.total_profits,
-                        total_losses = EXCLUDED.total_losses,
-                        profit_factor = EXCLUDED.profit_factor,
-                        num_wins = EXCLUDED.num_wins,
-                        num_losses = EXCLUDED.num_losses,
-                        avg_win = EXCLUDED.avg_win,
-                        avg_loss = EXCLUDED.avg_loss,
-                        best_trade_amount = EXCLUDED.best_trade_amount,
-                        best_trade_time_ago = EXCLUDED.best_trade_time_ago,
-                        worst_trade_amount = EXCLUDED.worst_trade_amount,
-                        worst_trade_time_ago = EXCLUDED.worst_trade_time_ago,
-                        best_perf_amount = EXCLUDED.best_perf_amount,
-                        best_perf_count = EXCLUDED.best_perf_count,
-                        worst_perf_amount = EXCLUDED.worst_perf_amount,
-                        worst_perf_count = EXCLUDED.worst_perf_count,
-                        avg_trade_size = EXCLUDED.avg_trade_size,
-                        last_updated = EXCLUDED.last_updated,
-                        scan_event_id = EXCLUDED.scan_event_id
-                    """,
-                    {
-                        "wallet": wallet_data["wallet"],
-                        "profit_24h": wallet_data.get("profit_24h", 0),
-                        "recent_trade_market": wallet_data.get("recent_trade_market"),
-                        "recent_trade_side": wallet_data.get("recent_trade_side"),
-                        "recent_trade_timestamp": wallet_data.get("recent_trade_timestamp"),
-                        "recent_trade_pnl": wallet_data.get("recent_trade_pnl"),
-                        "avg_time_between_positions": wallet_data.get("avg_time_between_positions", 0),
-                        "last_position_timestamp": wallet_data.get("last_position_timestamp"),
-                        "win_rate": wallet_data.get("win_rate", 0),
-                        "total_trades": wallet_data.get("total_trades", 0),
-                        "avg_trades_per_day": wallet_data.get("avg_trades_per_day", 0),
-                        "avg_hold_time_seconds": wallet_data.get("avg_hold_time_seconds", 0),
-                        "total_profits": wallet_data.get("total_profits", 0),
-                        "total_losses": wallet_data.get("total_losses", 0),
-                        "profit_factor": wallet_data.get("profit_factor", 0),
-                        "num_wins": wallet_data.get("num_wins", 0),
-                        "num_losses": wallet_data.get("num_losses", 0),
-                        "avg_win": wallet_data.get("avg_win", 0),
-                        "avg_loss": wallet_data.get("avg_loss", 0),
-                        "best_trade_amount": wallet_data.get("best_trade_amount", 0),
-                        "best_trade_time_ago": wallet_data.get("best_trade_time_ago"),
-                        "worst_trade_amount": wallet_data.get("worst_trade_amount", 0),
-                        "worst_trade_time_ago": wallet_data.get("worst_trade_time_ago"),
-                        "best_perf_amount": wallet_data.get("best_perf_amount", 0),
-                        "best_perf_count": wallet_data.get("best_perf_count", 0),
-                        "worst_perf_amount": wallet_data.get("worst_perf_amount", 0),
-                        "worst_perf_count": wallet_data.get("worst_perf_count", 0),
-                        "avg_trade_size": wallet_data.get("avg_trade_size", 0),
-                        "last_updated": int(datetime.now(timezone.utc).timestamp()),
-                        "scan_event_id": wallet_data.get("scan_event_id"),
-                    },
-                )
             conn.commit()
 
 
